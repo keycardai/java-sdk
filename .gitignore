@@ -1,0 +1,19 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Live-zone credentials for examples. Never commit these.
+.env
+.env.*
+!.env.example
+
+# Release scripts are Python (commitizen is a Python tool)
+__pycache__/
+*.pyc
