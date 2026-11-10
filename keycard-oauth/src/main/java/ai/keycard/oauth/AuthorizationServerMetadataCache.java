@@ -5,9 +5,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -40,8 +38,7 @@ public final class AuthorizationServerMetadataCache {
     private final Duration discoveryTtl;
     private final Duration negativeTtl;
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, CompletableFuture<AuthorizationServerMetadata>> inFlight =
-            new ConcurrentHashMap<>();
+    private final SingleFlight<String, AuthorizationServerMetadata> inFlight = new SingleFlight<>();
 
     private AuthorizationServerMetadataCache(Builder builder) {
         this.discovery = builder.discovery;
@@ -83,40 +80,11 @@ public final class AuthorizationServerMetadataCache {
      */
     public AuthorizationServerMetadata get(URI issuer) {
         String key = key(issuer);
-        while (true) {
-            Entry entry = entries.get(key);
-            if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
-                return entry.unwrap();
-            }
-
-            CompletableFuture<AuthorizationServerMetadata> mine = new CompletableFuture<>();
-            CompletableFuture<AuthorizationServerMetadata> shared = inFlight.putIfAbsent(key, mine);
-            if (shared == null) {
-                return fetch(key, issuer, mine);
-            }
-            try {
-                return shared.get();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new NetworkException("interrupted while waiting for discovery of " + issuer, e);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                if (cause instanceof FetcherInterrupted) {
-                    // The thread doing the fetch was cancelled; that is its caller's outcome, not
-                    // ours. Drop its finished future (its own cleanup may not have run yet) and
-                    // fetch again.
-                    inFlight.remove(key, shared);
-                    continue;
-                }
-                if (cause instanceof RuntimeException runtime) {
-                    throw runtime;
-                }
-                if (cause instanceof Error error) {
-                    throw error;
-                }
-                throw new KeycardException("discovery of " + issuer + " failed", cause);
-            }
+        Entry entry = entries.get(key);
+        if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
+            return entry.unwrap();
         }
+        return inFlight.run(key, () -> fetch(key, issuer), "discovery of " + issuer);
     }
 
     /**
@@ -168,35 +136,31 @@ public final class AuthorizationServerMetadataCache {
      */
     public void invalidate(URI issuer) {
         entries.remove(key(issuer));
+        inFlight.forget(key(issuer));
     }
 
     /** Drops every cached outcome. */
     public void clear() {
         entries.clear();
+        inFlight.forgetAll();
     }
 
-    private AuthorizationServerMetadata fetch(
-            String key, URI issuer, CompletableFuture<AuthorizationServerMetadata> mine) {
+    private AuthorizationServerMetadata fetch(String key, URI issuer) {
+        // Another caller may have finished a fetch while this one waited to lead.
+        Entry entry = entries.get(key);
+        if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
+            return entry.unwrap();
+        }
         try {
             AuthorizationServerMetadata metadata = discovery.discover(issuer);
             entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
-            mine.complete(metadata);
             return metadata;
         } catch (KeycardException e) {
-            if (e.getCause() instanceof InterruptedException) {
-                mine.completeExceptionally(new FetcherInterrupted());
-            } else {
-                if (!e.retryable() && !negativeTtl.isZero()) {
-                    entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
-                }
-                mine.completeExceptionally(e);
+            boolean interrupted = e.getCause() instanceof InterruptedException;
+            if (!interrupted && !e.retryable() && !negativeTtl.isZero()) {
+                entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
             }
             throw e;
-        } catch (RuntimeException | Error e) {
-            mine.completeExceptionally(e);
-            throw e;
-        } finally {
-            inFlight.remove(key, mine);
         }
     }
 
@@ -215,16 +179,6 @@ public final class AuthorizationServerMetadataCache {
                 throw failure;
             }
             return Objects.requireNonNull(metadata);
-        }
-    }
-
-    /** Marks a shared fetch that ended because its own thread was interrupted. */
-    private static final class FetcherInterrupted extends RuntimeException {
-
-        private static final long serialVersionUID = 1L;
-
-        FetcherInterrupted() {
-            super(null, null, false, false);
         }
     }
 
