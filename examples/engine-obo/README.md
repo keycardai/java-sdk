@@ -42,3 +42,19 @@ container, registers the workload by `unix:uid:0`, and runs the same code in a J
 that shares the agent's PID namespace, fetching SVIDs with `SpiffeJwtSvidSource`.
 
 Output names claims only, never a token.
+
+## Device authorization grant
+
+`bin/device-e2e` runs the device-authorization Integration Tests as the engine:
+
+```sh
+bin/device-e2e headless   # unknown resource is invalid_target; another client's poll is invalid_grant
+bin/device-e2e confirm    # prints a user code; approve it, then it checks the tokens and a refresh
+bin/device-e2e deny       # prints a user code; deny it, and the poll ends with access_denied
+```
+
+`confirm` asks for `openid` and two resources, so the zone adds its UserInfo resource and the
+client needs dependencies on all three. Production zones can't show the confirmation page for a
+code a v2 workload credential requested yet: the verify page looks the client up among
+credentials without a provider and renders "Invalid or expired code". Until svc-sts #861 ships,
+`DEVICE_CLIENT=public` runs `confirm` and `deny` as the public CLI client instead.

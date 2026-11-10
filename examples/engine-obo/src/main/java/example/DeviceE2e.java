@@ -36,8 +36,14 @@ public final class DeviceE2e {
         WorkloadIdentity engine = WorkloadIdentity.builder(FileTokenSource.of(Path.of(Env.require("SVID_FILE"))))
                 .clientId(Env.require("ENGINE_V2_CLIENT_ID"))
                 .build();
-        DeviceAuthorizationClient device =
-                DeviceAuthorizationClient.builder(zone).credential(engine).build();
+        // DEVICE_CLIENT=public runs as the CLI's public client instead of the engine. Production
+        // zones can't show the confirmation page for a v2 workload credential yet: the verify
+        // leg looks clients up among zone-provider credentials only (svc-sts #861 widens it).
+        boolean publicClient = "public".equals(System.getenv("DEVICE_CLIENT"));
+        String cliClientId = publicClient ? Env.require("CLI_CLIENT_ID") : null;
+        DeviceAuthorizationClient device = publicClient
+                ? DeviceAuthorizationClient.builder(zone).clientId(cliClientId).build()
+                : DeviceAuthorizationClient.builder(zone).credential(engine).build();
         List<String> failures = new ArrayList<>();
 
         switch (mode) {
@@ -71,8 +77,9 @@ public final class DeviceE2e {
                 report(failures, row1, "row 1: access token aud=" + claims.get("aud") + ", refresh_token "
                         + (token.refreshToken() == null ? "absent" : "present") + ", id_token sub=" + id.get("sub"));
 
-                AuthorizationCodeClient refresher =
-                        AuthorizationCodeClient.builder(zone).credential(engine).build();
+                AuthorizationCodeClient refresher = publicClient
+                        ? AuthorizationCodeClient.builder(zone).clientId(cliClientId).build()
+                        : AuthorizationCodeClient.builder(zone).credential(engine).build();
                 TokenResponse refreshed = refresher.refresh(token.refreshToken(), List.of(gateway), List.of());
                 Object aud = Env.claims(refreshed.accessToken()).get("aud");
                 report(failures, String.valueOf(aud).contains(gateway.toString()),
@@ -95,8 +102,7 @@ public final class DeviceE2e {
         URI open = authorization.verificationUriComplete() != null
                 ? authorization.verificationUriComplete()
                 : authorization.verificationUri();
-        System.out.println("  Open " + open);
-        System.out.println("  and confirm the code " + authorization.userCode() + " (expires in "
+        System.out.println("  Open " + open + " and confirm the code " + authorization.userCode() + " (expires in "
                 + authorization.expiresIn().toMinutes() + " minutes)");
         System.out.flush();
     }
