@@ -48,6 +48,8 @@ done
 srv entry show -spiffeID "spiffe://$TD/engine" 2>/dev/null | grep -q "unix:uid:0" || \
   srv entry create -parentID "spiffe://$TD/agent" -spiffeID "spiffe://$TD/engine" -selector unix:uid:0 >/dev/null
 
+# The gateway hop reads its SVID from a file in both modes.
+[ -n "${GATEWAY_SVID_FILE:-}" ] && mint_svid spiffe://java-sdk.test/gateway "$GATEWAY_SVID_FILE"
 "$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" installDist
 LIB="$ROOT/examples/engine-obo/build/install/engine-obo/lib"
 
@@ -57,4 +59,5 @@ exec docker run --rm --pid "container:$AGENT" \
   -e SVID_SOURCE=workload-api -e SPIFFE_ENDPOINT_SOCKET=unix:/run/spire/sockets/agent.sock \
   -e KEYCARD_ZONE_URL -e LEDGER_RESOURCE -e ENGINE_APP_IDENTIFIER -e ENGINE_V2_CLIENT_ID \
   -e SUBJECT_TOKEN_FILE=/live/subject-token \
+  ${GATEWAY_V2_CLIENT_ID:+-e GATEWAY_V2_CLIENT_ID -e GATEWAY_APP_IDENTIFIER -e GATEWAY_RESOURCE -e GATEWAY_SVID_FILE=/live/gateway-svid.jwt} \
   eclipse-temurin:21-jre java -cp '/app/lib/*' example.LiveE2e

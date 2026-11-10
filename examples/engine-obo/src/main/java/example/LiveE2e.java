@@ -61,8 +61,66 @@ public final class LiveE2e {
             return check(issued, user, ledger, engineApp);
         });
 
+        if (System.getenv("GATEWAY_V2_CLIENT_ID") != null) {
+            twoHops(zone, ledger, engine, svid, subjectToken, user);
+        }
+
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /**
+     * Engine to gateway to ledger. The engine's hop always names itself as actor; the gateway's hop
+     * either does too (the chain nests) or doesn't (the zone replaces the chain with the caller).
+     */
+    private static void twoHops(
+            URI zone, URI ledger, WorkloadIdentity engine, IdentityTokenSource engineSvid, String subjectToken, Object user)
+            throws Exception {
+        URI gatewayResource = Env.uri("GATEWAY_RESOURCE");
+        String gatewayApp = Env.require("GATEWAY_APP_IDENTIFIER");
+        String engineApp = Env.require("ENGINE_APP_IDENTIFIER");
+        FileTokenSource gatewaySvid = FileTokenSource.of(Path.of(Env.require("GATEWAY_SVID_FILE")));
+        WorkloadIdentity gateway =
+                WorkloadIdentity.builder(gatewaySvid).clientId(Env.require("GATEWAY_V2_CLIENT_ID")).build();
+
+        String hop1 = TokenExchangeClient.builder(zone)
+                .credential(engine)
+                .actor(engineSvid)
+                .build()
+                .exchangeToken(subjectToken, gatewayResource)
+                .accessToken();
+
+        scenario("two hops, both with actor tokens: act nests gateway over engine", () -> {
+            TokenResponse issued = TokenExchangeClient.builder(zone)
+                    .credential(gateway)
+                    .actor(gatewaySvid)
+                    .build()
+                    .exchangeToken(hop1, ledger);
+            return chain(issued, user, gatewayApp, engineApp);
+        });
+
+        scenario("two hops, second without an actor token: act is replaced by the gateway", () -> {
+            TokenResponse issued = TokenExchangeClient.builder(zone)
+                    .credential(gateway)
+                    .build()
+                    .exchangeToken(hop1, ledger);
+            return chain(issued, user, gatewayApp, null);
+        });
+    }
+
+    /** Checks sub, the top-level actor, and the nested actor (or its absence). */
+    private static String chain(TokenResponse issued, Object user, String top, String nested) {
+        Map<String, Object> claims = Env.claims(issued.accessToken());
+        Object act = claims.get("act");
+        String summary = "sub=" + claims.get("sub") + " act=" + act;
+        if (!user.equals(claims.get("sub")) || !(act instanceof Map<?, ?> outer) || !top.equals(outer.get("sub"))) {
+            return "mismatch " + summary;
+        }
+        Object inner = outer.get("act");
+        boolean innerOk = nested == null
+                ? inner == null
+                : inner instanceof Map<?, ?> in && nested.equals(in.get("sub"));
+        return (innerOk ? "ok " : "mismatch ") + summary;
     }
 
     private interface Run {
