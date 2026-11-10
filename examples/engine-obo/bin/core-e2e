@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# The core oauth-client, credential and JWT Integration Tests rows against a live zone, as the
+# engine. Needs ENGINE_SECRET_FILE: the engine's password credential as returned on creation.
+source "$(dirname "$0")/env.sh"
+: "${ENGINE_SECRET_FILE:=$LIVE_DIR/engine-secret.json}"
+export ENGINE_SECRET_FILE
+export WRONG_AUDIENCE_SVID_FILE="$LIVE_DIR/svid-wrong-audience.jwt"
+mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"
+mint_svid spiffe://java-sdk.test/gateway "$GATEWAY_SVID_FILE"
+docker exec java-spire-server /opt/spire/bin/spire-server jwt mint \
+  -spiffeID spiffe://java-sdk.test/engine -audience https://not-the-zone.example -ttl 300s 2>/dev/null \
+  | tail -1 > "$WRONG_AUDIENCE_SVID_FILE"
+chmod 600 "$WRONG_AUDIENCE_SVID_FILE"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" coreE2e

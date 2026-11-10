@@ -52,3 +52,9 @@ tasks.register<JavaExec>("webIdentityE2e") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("example.WebIdentityE2e")
 }
+
+tasks.register<JavaExec>("coreE2e") {
+    description = "Runs the core oauth-client, credential and JWT live rows."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("example.CoreE2e")
+}
