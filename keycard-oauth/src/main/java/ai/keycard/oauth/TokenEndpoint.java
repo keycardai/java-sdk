@@ -29,6 +29,21 @@ final class TokenEndpoint {
             ClientAuthentication auth,
             Duration timeout,
             String operation) {
+        return post(transport, endpoint, form, auth, timeout, operation, java.util.Set.of());
+    }
+
+    /**
+     * As {@link #post}, with OAuth error codes this operation treats as permanent on top of base's
+     * table, such as {@code invalid_grant} on a refresh.
+     */
+    static TokenResponse post(
+            KeycardHttpTransport transport,
+            URI endpoint,
+            Map<String, List<String>> form,
+            ClientAuthentication auth,
+            Duration timeout,
+            String operation,
+            java.util.Set<String> locallyPermanent) {
         Map<String, List<String>> body = new LinkedHashMap<>(form);
         auth.formFields().forEach((name, value) -> body.put(name, List.of(value)));
         TransportRequest request = TransportRequest.post(
@@ -39,7 +54,7 @@ final class TokenEndpoint {
         }
         TransportResponse response = transport.send(request);
         if (!response.isSuccess()) {
-            throw error(response, operation + " request");
+            throw error(response, operation + " request", locallyPermanent);
         }
         return parseToken(response.body(), operation);
     }
@@ -64,6 +79,10 @@ final class TokenEndpoint {
      * OAuthErrorException}, anything else an {@link HttpStatusException}.
      */
     static HttpStatusException error(TransportResponse response, String what) {
+        return error(response, what, java.util.Set.of());
+    }
+
+    static HttpStatusException error(TransportResponse response, String what, java.util.Set<String> locallyPermanent) {
         Map<String, Object> document = parseObjectOrNull(response.body());
         if (document != null && document.get("error") instanceof String code && !code.isEmpty()) {
             String description = stringOrNull(document.get("error_description"));
@@ -74,7 +93,8 @@ final class TokenEndpoint {
                     response.body(),
                     code,
                     description,
-                    stringOrNull(document.get("error_uri")));
+                    stringOrNull(document.get("error_uri")),
+                    !OAuthErrorCodes.isPermanent(code) && !locallyPermanent.contains(code));
         }
         return new HttpStatusException(
                 what + " returned HTTP " + response.status(), response.status(), response.body());

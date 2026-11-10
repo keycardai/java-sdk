@@ -40,6 +40,21 @@ public class OAuthErrorException extends HttpStatusException {
         this.errorUri = errorUri;
     }
 
+    /** Creates the exception with a classification an operation overrides locally. */
+    OAuthErrorException(
+            String message,
+            int status,
+            String body,
+            String error,
+            @Nullable String errorDescription,
+            @Nullable String errorUri,
+            boolean retryable) {
+        super(message, status, body, retryable);
+        this.error = error;
+        this.errorDescription = errorDescription;
+        this.errorUri = errorUri;
+    }
+
     /**
      * The OAuth {@code error} code.
      *

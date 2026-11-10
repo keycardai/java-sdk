@@ -46,6 +46,12 @@ public final class StubZone implements AutoCloseable {
     /** JWKS path advertised by {@link #serveDiscovery()}. */
     public static final String JWKS_PATH = "/openidconnect/jwks";
 
+    /** Authorization endpoint path advertised by {@link #serveDiscovery()}. */
+    public static final String AUTHORIZE_PATH = "/oauth/authorize";
+
+    /** UserInfo endpoint path advertised by {@link #serveDiscovery()}. */
+    public static final String USERINFO_PATH = "/oauth/userinfo";
+
     private final HttpServer server;
     private final URI issuer;
     private final Map<String, Function<RecordedRequest, StubResponse>> routes = new ConcurrentHashMap<>();
@@ -103,6 +109,8 @@ public final class StubZone implements AutoCloseable {
         metadata.put("issuer", issuer.toString());
         metadata.put("token_endpoint", url(TOKEN_PATH).toString());
         metadata.put("jwks_uri", url(JWKS_PATH).toString());
+        metadata.put("authorization_endpoint", url(AUTHORIZE_PATH).toString());
+        metadata.put("userinfo_endpoint", url(USERINFO_PATH).toString());
         metadata.put(
                 "grant_types_supported",
                 List.of("client_credentials", "authorization_code", "urn:ietf:params:oauth:grant-type:token-exchange"));
