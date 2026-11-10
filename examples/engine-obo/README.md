@@ -26,6 +26,12 @@ user's token and the SVID are written there too, readable only by the owner.
 export KEYCARD_ZONE_URL=https://<zone-id>.keycard.cloud LIVE_DIR=/path/outside/the/repo
 bin/sign-in      # opens the browser, stores the user's access token
 bin/live-e2e     # mints a JWT-SVID from the SPIRE server container, runs both paths
+bin/live-e2e-workload-api   # same paths, SVID from a SPIRE agent over the Workload API
 ```
+
+`bin/live-e2e` reads the SVID from a file, the way spiffe-helper delivers it, through
+`FileTokenSource`. `bin/live-e2e-workload-api` starts a SPIRE agent joined to the server
+container, registers the workload by `unix:uid:0`, and runs the same code in a JDK container
+that shares the agent's PID namespace, fetching SVIDs with `SpiffeJwtSvidSource`.
 
 Output names claims only, never a token.

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Runs the live scenarios with the SVID fetched over the SPIFFE Workload API:
+# a SPIRE agent joins the SPIRE server container, and the Java run executes in
+# a JDK container sharing the agent's PID namespace so the agent's unix
+# attestor can identify it (registered as uid 0).
+source "$(dirname "$0")/env.sh"
+NET=java-spire
+AGENT=java-spire-agent
+TD=java-sdk.test
+SERVER=java-spire-server
+srv() { docker exec "$SERVER" /opt/spire/bin/spire-server "$@"; }
+
+docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null
+docker network connect "$NET" "$SERVER" 2>/dev/null || true
+
+mkdir -p "$LIVE_DIR/agent"
+cat > "$LIVE_DIR/agent/agent.conf" <<CONF
+agent {
+    data_dir = "/opt/spire/data/agent"
+    log_level = "INFO"
+    server_address = "$SERVER"
+    server_port = "8081"
+    socket_path = "/run/spire/sockets/agent.sock"
+    trust_domain = "$TD"
+    insecure_bootstrap = true
+}
+plugins {
+    NodeAttestor "join_token" { plugin_data {} }
+    KeyManager "memory" { plugin_data {} }
+    WorkloadAttestor "unix" { plugin_data {} }
+}
+CONF
+
+if ! docker inspect -f '{{.State.Running}}' "$AGENT" 2>/dev/null | grep -q true; then
+  docker rm -f "$AGENT" >/dev/null 2>&1 || true
+  TOKEN=$(srv token generate -spiffeID "spiffe://$TD/agent" | awk '{print $2}')
+  docker volume create java-spire-sockets >/dev/null
+  docker run -d --name "$AGENT" --network "$NET" \
+    -v "$LIVE_DIR/agent/agent.conf:/opt/spire/conf/agent/agent.conf:ro" \
+    -v java-spire-sockets:/run/spire/sockets \
+    ghcr.io/spiffe/spire-agent:1.15.5 -config /opt/spire/conf/agent/agent.conf -joinToken "$TOKEN" >/dev/null
+fi
+for _ in $(seq 1 30); do
+  docker exec "$AGENT" /opt/spire/bin/spire-agent healthcheck -socketPath /run/spire/sockets/agent.sock >/dev/null 2>&1 && break
+  sleep 2
+done
+
+srv entry show -spiffeID "spiffe://$TD/engine" 2>/dev/null | grep -q "unix:uid:0" || \
+  srv entry create -parentID "spiffe://$TD/agent" -spiffeID "spiffe://$TD/engine" -selector unix:uid:0 >/dev/null
+
+"$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" installDist
+LIB="$ROOT/examples/engine-obo/build/install/engine-obo/lib"
+
+exec docker run --rm --pid "container:$AGENT" \
+  -v java-spire-sockets:/run/spire/sockets:ro \
+  -v "$LIB:/app/lib:ro" -v "$LIVE_DIR:/live:ro" \
+  -e SVID_SOURCE=workload-api -e SPIFFE_ENDPOINT_SOCKET=unix:/run/spire/sockets/agent.sock \
+  -e KEYCARD_ZONE_URL -e LEDGER_RESOURCE -e ENGINE_APP_IDENTIFIER -e ENGINE_V2_CLIENT_ID \
+  -e SUBJECT_TOKEN_FILE=/live/subject-token \
+  eclipse-temurin:21-jre java -cp '/app/lib/*' example.LiveE2e

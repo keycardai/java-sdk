@@ -1,11 +1,13 @@
 package example;
 
 import ai.keycard.oauth.FileTokenSource;
+import ai.keycard.oauth.IdentityTokenSource;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.TokenExchangeClient;
 import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.WorkloadIdentity;
+import ai.keycard.spiffe.SpiffeJwtSvidSource;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +22,9 @@ import java.util.Map;
  *   <li>as the client assertion and the actor token, the actor matched by a v1 credential.
  * </ol>
  *
- * <p>Each scenario prints PASS or FAIL and the issued token's identity claims, never a token.
+ * <p>The SVID comes from SVID_FILE, or from the SPIFFE Workload API when SVID_SOURCE is
+ * {@code workload-api} (socket from SPIFFE_ENDPOINT_SOCKET). Each scenario prints PASS or FAIL and
+ * the issued token's identity claims, never a token.
  */
 public final class LiveE2e {
 
@@ -31,7 +35,10 @@ public final class LiveE2e {
         URI ledger = Env.uri("LEDGER_RESOURCE");
         String engineApp = Env.require("ENGINE_APP_IDENTIFIER");
         String v2ClientId = Env.require("ENGINE_V2_CLIENT_ID");
-        FileTokenSource svid = FileTokenSource.of(Path.of(Env.require("SVID_FILE")));
+        IdentityTokenSource svid = "workload-api".equals(System.getenv("SVID_SOURCE"))
+                ? SpiffeJwtSvidSource.builder(zone.toString()).build()
+                : FileTokenSource.of(Path.of(Env.require("SVID_FILE")));
+        System.out.println("SVID source: " + svid);
         String subjectToken = Files.readString(Path.of(Env.require("SUBJECT_TOKEN_FILE"))).strip();
         Object user = Env.claims(subjectToken).get("sub");
 

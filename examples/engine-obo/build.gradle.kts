@@ -1,10 +1,19 @@
 plugins {
     java
+    application
 }
 
 dependencies {
     implementation("ai.keycard:keycard-oauth:0.1.0-SNAPSHOT")
     implementation("ai.keycard:keycard-spiffe:0.1.0-SNAPSHOT")
+    // The Workload API path runs in a Linux container; java-spiffe needs a
+    // native gRPC transport for the agent's Unix socket.
+    runtimeOnly("io.spiffe:grpc-netty-linux:0.8.17")
+}
+
+// installDist lays out build/install/engine-obo/lib for the container run.
+application {
+    mainClass.set("example.LiveE2e")
 }
 
 tasks.withType<JavaCompile>().configureEach {
