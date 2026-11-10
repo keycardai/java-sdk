@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Opens the browser to sign a user in; stores the access token in $LIVE_DIR.
+source "$(dirname "$0")/env.sh"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" signIn

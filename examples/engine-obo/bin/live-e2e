@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Mints a fresh JWT-SVID from the SPIRE server container, then runs both scenarios.
+source "$(dirname "$0")/env.sh"
+docker exec java-spire-server /opt/spire/bin/spire-server jwt mint \
+  -spiffeID spiffe://java-sdk.test/engine -audience "$KEYCARD_ZONE_URL" -ttl 300s 2>/dev/null \
+  | tail -1 > "$SVID_FILE"
+chmod 600 "$SVID_FILE"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" liveE2e
