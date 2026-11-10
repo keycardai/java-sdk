@@ -40,3 +40,9 @@ tasks.register<JavaExec>("deviceE2e") {
     mainClass.set("example.DeviceE2e")
     standardInput = System.`in`
 }
+
+tasks.register<JavaExec>("onboardingE2e") {
+    description = "Runs credential discovery and client registration against a live zone."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("example.OnboardingE2e")
+}

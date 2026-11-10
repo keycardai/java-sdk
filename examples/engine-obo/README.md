@@ -58,3 +58,13 @@ client needs dependencies on all three. Production zones can't show the confirma
 code a v2 workload credential requested yet: the verify page looks the client up among
 credentials without a provider and renders "Invalid or expired code". Until svc-sts #861 ships,
 `DEVICE_CLIENT=public` runs `confirm` and `deny` as the public CLI client instead.
+
+## Credential discovery and client registration
+
+`bin/onboarding-e2e` discovers the engine's credential from `KEYCARD_*` variables naming the
+SVID file, as a pod would carry them, and exchanges the user's token with it. It then registers
+a public client through RFC 7591, and sends malformed metadata (a redirect URI that isn't a URL)
+that the spec expects the zone to refuse. Each run adds registrations to the zone.
+
+Production zones accept the malformed registration, and also register a confidential
+`client_secret_basic` client with a secret, so the refusal row fails against them today.
