@@ -11,6 +11,10 @@ description = "SPIFFE JWT-SVID identity token source for Keycard workload identi
 dependencies {
     api(project(":keycard-oauth"))
     api(libs.java.spiffe.core)
+    // gRPC brings Guava 33.5.0, inside the range of GHSA-xxph-c9ww-hj94 (CompactHashMap
+    // deserialization, fixed in 33.7.2). A direct dependency, not a
+    // constraint, so Maven consumers resolve the patched version too.
+    runtimeOnly(libs.guava)
 
     testImplementation(testFixtures(project(":keycard-oauth")))
 }
