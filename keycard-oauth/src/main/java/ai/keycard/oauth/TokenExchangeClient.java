@@ -41,6 +41,15 @@ public final class TokenExchangeClient {
     private final Duration fetchTimeout;
     private final AuthorizationServerMetadataCache metadata;
 
+    private TokenExchangeClient(URI issuer, TokenExchangeClient template) {
+        this.issuer = issuer;
+        this.credential = template.credential;
+        this.actor = template.actor;
+        this.transport = template.transport;
+        this.fetchTimeout = template.fetchTimeout;
+        this.metadata = template.metadata;
+    }
+
     private TokenExchangeClient(Builder builder) {
         this.issuer = builder.issuer;
         this.credential = builder.credential;
@@ -153,6 +162,21 @@ public final class TokenExchangeClient {
      */
     public TokenResponse impersonate(String userIdentifier, URI resource) {
         return impersonate(userIdentifier, resource, null);
+    }
+
+    /**
+     * A client for another zone sharing this one's credential, actor, transport and caches (the
+     * caches are keyed by issuer, so zones stay isolated). With a multi-zone {@link ClientSecret},
+     * the new zone's pair is used, and a zone the credential doesn't hold fails closed before any
+     * request.
+     *
+     * @param zoneIssuer the other zone's issuer
+     * @return the client for that zone
+     * @throws ConfigurationException when the issuer isn't an absolute http(s) URL
+     */
+    public TokenExchangeClient forZone(URI zoneIssuer) {
+        AuthorizationServerDiscovery.metadataUrl(Objects.requireNonNull(zoneIssuer, "zoneIssuer"));
+        return new TokenExchangeClient(zoneIssuer, this);
     }
 
     /**
