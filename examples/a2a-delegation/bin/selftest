@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Hermetic end-to-end proof: stub zone with a real RFC 8693 exchange, agent A on
+# keycard-a2a, agent B on a2a-java. No network.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/a2a-delegation" selftest
