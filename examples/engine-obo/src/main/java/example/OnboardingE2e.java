@@ -52,6 +52,23 @@ public final class OnboardingE2e {
             report(failures, false, "discovery row 2: " + e);
         }
 
+        // credential-discovery row 1: the same process on a laptop, with a client secret
+        Map<String, Object> secret = com.nimbusds.jose.util.JSONObjectUtils.parse(
+                Files.readString(Path.of(Env.require("ENGINE_SECRET_FILE"))));
+        Credential laptop = CredentialDiscovery.discover(Map.of(
+                "KEYCARD_CLIENT_ID", (String) secret.get("identifier"),
+                "KEYCARD_CLIENT_SECRET", (String) secret.get("password")));
+        try {
+            TokenResponse issued = TokenExchangeClient.builder(zone)
+                    .credential(laptop)
+                    .build()
+                    .exchangeToken(user, Env.uri("LEDGER_RESOURCE"));
+            report(failures, true, "discovery row 1: " + laptop.getClass().getSimpleName()
+                    + " from the environment exchanged a token: aud=" + Env.claims(issued.accessToken()).get("aud"));
+        } catch (Exception e) {
+            report(failures, false, "discovery row 1: " + e);
+        }
+
         ClientRegistrationClient registration = ClientRegistrationClient.builder(zone).build();
         try {
             RegisteredClient client = registration.register(ClientRegistrationRequest.builder()

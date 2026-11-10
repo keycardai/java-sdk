@@ -31,6 +31,14 @@ public final class LiveE2e {
                     () -> driver.postMcp("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", null)
                                     .statusCode()
                             == 401);
+            var prm = driver.get("/.well-known/oauth-protected-resource/mcp");
+            driver.check(
+                    "metadata row 1: RFC 9728 metadata names the zone as the authorization server",
+                    () -> prm.statusCode() == 200 && prm.body().contains(config.zoneUrl().toString()));
+            var as = driver.get("/.well-known/oauth-authorization-server");
+            driver.check(
+                    "metadata row 2: the proxied RFC 8414 document is the zone's",
+                    () -> as.statusCode() == 200 && as.body().contains(config.zoneUrl() + "/oauth/2/token"));
             McpSyncClient client = driver.client(user);
             try {
                 String whoami = Driver.text(Driver.call(client, "whoami"));

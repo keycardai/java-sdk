@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Every non-interactive live suite against one sandbox zone, in order. Each suite prints its
+# rows and exits non-zero on a failed row; this keeps going and summarizes. Needs the
+# engine-obo provisioning (LIVE_DIR with state.json, a signed-in user token, the engine's
+# password credential), the SPIRE server container, cloudflared, KEYCARD_ZONE_URL, ZONE_ID
+# and ORG_ID. The device rows that need a person (confirm, deny) run separately through
+# engine-obo/bin/device-e2e.
+set -uo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+suites=(
+  "engine-obo/bin/core-e2e"
+  "engine-obo/bin/live-e2e"
+  "engine-obo/bin/live-e2e-workload-api"
+  "engine-obo/bin/onboarding-e2e"
+  "engine-obo/bin/web-identity-e2e"
+  "engine-obo/bin/device-e2e headless"
+  "mcp-server-servlet/bin/live-e2e"
+  "mcp-server-spring-ai/bin/live-e2e"
+  "a2a-delegation/bin/live-e2e"
+)
+failed=()
+for suite in "${suites[@]}"; do
+  echo "== $suite"
+  # shellcheck disable=SC2086
+  output=$("$HERE"/$suite 2>&1)
+  status=$?
+  grep -E '^  (ok|FAIL)|^(PASS|FAIL) |^       ' <<<"$output" || true
+  [ "$status" -eq 0 ] || failed+=("$suite")
+done
+echo
+if [ ${#failed[@]} -eq 0 ]; then echo "every suite passed"; else printf 'suites with failing rows: %s\n' "${failed[*]}"; exit 1; fi
