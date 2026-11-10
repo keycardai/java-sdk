@@ -38,6 +38,21 @@ public class WorkloadIdentityRuntimeException extends KeycardException {
     }
 
     /**
+     * Creates the exception with an explicit classification, for a source that knows whether its
+     * failure is transient, such as an unreachable local agent.
+     *
+     * @param message what failed
+     * @param source the source identifier
+     * @param cause the underlying failure, or {@code null}
+     * @param retryable whether fetching again unchanged could succeed
+     */
+    public WorkloadIdentityRuntimeException(
+            String message, String source, @Nullable Throwable cause, boolean retryable) {
+        super(message, cause, retryable);
+        this.source = source;
+    }
+
+    /**
      * The failing source's identifier.
      *
      * @return {@code file}, {@code gcp-metadata}, {@code custom}, or another source's identifier
