@@ -25,3 +25,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       # build runs compile, tests, Javadoc and spotlessCheck for every module.
       - run: ./gradlew build publishToMavenLocal --console=plain
+      # The MCP SDK example against a stub zone: bearer filter, grant, and the
+      # official MCP Java SDK's servlet transport and client, with no network.
+      - run: examples/mcp-server-servlet/bin/selftest

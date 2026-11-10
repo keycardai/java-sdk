@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Hermetic end-to-end proof: stub zone, this server, the MCP SDK client. No network.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/mcp-server-servlet" selftest

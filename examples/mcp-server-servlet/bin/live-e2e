@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# The grant-decorator Integration Tests against a live zone. Reuses engine-obo's
+# sandbox provisioning: this server runs as the engine application (v2 workload
+# credential, SPIRE JWT-SVID assertion), the signed-in user's token calls it, and
+# the grant exchanges that token for the ledger resource.
+source "$(dirname "$0")/../../engine-obo/bin/env.sh"
+mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"
+export KEYCARD_CLIENT_ID="$ENGINE_V2_CLIENT_ID"
+export KEYCARD_ASSERTION_FILE="$SVID_FILE"
+export KEYCARD_RESOURCE_ID="$ENGINE_RESOURCE"
+# The second resource is registered nowhere, so its exchange fails (integration row 2).
+export DOWNSTREAM_RESOURCES="$LEDGER_RESOURCE https://unregistered.java-sdk.test"
+export PORT="${PORT:-0}"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/mcp-server-servlet" liveE2e
