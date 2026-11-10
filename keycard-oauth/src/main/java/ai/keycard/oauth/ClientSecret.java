@@ -3,6 +3,7 @@ package ai.keycard.oauth;
 import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
@@ -81,6 +82,16 @@ public final class ClientSecret implements Credential, ClientAuthenticator {
      */
     public boolean isMultiZone() {
         return !zones.isEmpty();
+    }
+
+    /**
+     * The zones a multi-zone credential holds a pair for.
+     *
+     * @return their issuers in the order given to {@link #perZone(Map)}; empty for a single-zone
+     *     credential
+     */
+    public List<URI> zones() {
+        return zones.keySet().stream().map(URI::create).toList();
     }
 
     /**

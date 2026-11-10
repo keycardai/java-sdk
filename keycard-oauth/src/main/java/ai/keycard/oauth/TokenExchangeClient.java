@@ -92,11 +92,32 @@ public final class TokenExchangeClient {
      * @throws KeycardException for discovery, HTTP, network and response-format failures
      */
     public TokenResponse exchangeToken(String subjectToken, @Nullable URI resource) {
+        return exchangeToken(subjectToken, resource, null);
+    }
+
+    /**
+     * Exchanges a subject token for a token targeting {@code resource} with the given scopes, with
+     * the request the credential prepares.
+     *
+     * @param subjectToken the token being exchanged, typically the caller's access token
+     * @param resource the target resource, or {@code null}
+     * @param scope space-separated scopes, or {@code null} for the server's defaults
+     * @return the issued token
+     * @throws ConfigurationException when the client has no credential
+     * @throws OAuthErrorException when the zone answers with an OAuth error, such as {@code
+     *     invalid_grant} or {@code invalid_target}
+     * @throws KeycardException for discovery, HTTP, network and response-format failures
+     */
+    public TokenResponse exchangeToken(String subjectToken, @Nullable URI resource, @Nullable String scope) {
         if (credential == null) {
             throw new ConfigurationException("exchangeToken(subjectToken, resource) needs a credential");
         }
-        return exchangeToken(
-                credential.prepareTokenExchangeRequest(TokenExchangeContext.of(subjectToken, resource, issuer)));
+        TokenExchangeRequest request =
+                credential.prepareTokenExchangeRequest(TokenExchangeContext.of(subjectToken, resource, issuer));
+        if (scope != null) {
+            request = request.toBuilder().scope(scope).build();
+        }
+        return exchangeToken(request);
     }
 
     /**
