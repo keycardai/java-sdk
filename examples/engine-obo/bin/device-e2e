@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Device authorization grant against a live zone, as the engine (v2 workload credential).
+# Usage: bin/device-e2e [headless|confirm|deny]. confirm and deny need a person to act on
+# the printed user code.
+source "$(dirname "$0")/env.sh"
+mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"
+[ -n "${GATEWAY_SVID_FILE:-}" ] && mint_svid spiffe://java-sdk.test/gateway "$GATEWAY_SVID_FILE"
+# The SVIDs live 5 minutes and a person may take longer, so rotate the engine's file
+# while the flow waits, the way spiffe-helper would. FileTokenSource reads it per request.
+( while sleep 120; do mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"; done ) &
+ROTATOR=$!
+trap 'kill $ROTATOR 2>/dev/null' EXIT
+"$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" deviceE2e --args="${1:-headless}"

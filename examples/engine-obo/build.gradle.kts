@@ -33,3 +33,10 @@ tasks.register<JavaExec>("liveE2e") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("example.LiveE2e")
 }
+
+tasks.register<JavaExec>("deviceE2e") {
+    description = "Runs the device authorization grant against a live zone; pass the mode with --args."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("example.DeviceE2e")
+    standardInput = System.`in`
+}

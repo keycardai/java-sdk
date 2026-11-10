@@ -44,6 +44,20 @@ final class TokenEndpoint {
             Duration timeout,
             String operation,
             java.util.Set<String> locallyPermanent) {
+        TransportResponse response = send(transport, endpoint, form, auth, timeout);
+        if (!response.isSuccess()) {
+            throw error(response, operation + " request", locallyPermanent);
+        }
+        return parseToken(response.body(), operation);
+    }
+
+    /** POSTs a form with client authentication merged in, and returns the raw response. */
+    static TransportResponse send(
+            KeycardHttpTransport transport,
+            URI endpoint,
+            Map<String, List<String>> form,
+            ClientAuthentication auth,
+            Duration timeout) {
         Map<String, List<String>> body = new LinkedHashMap<>(form);
         auth.formFields().forEach((name, value) -> body.put(name, List.of(value)));
         TransportRequest request = TransportRequest.post(
@@ -52,11 +66,7 @@ final class TokenEndpoint {
         for (Map.Entry<String, String> header : auth.headers().entrySet()) {
             request = request.withHeader(header.getKey(), header.getValue());
         }
-        TransportResponse response = transport.send(request);
-        if (!response.isSuccess()) {
-            throw error(response, operation + " request", locallyPermanent);
-        }
-        return parseToken(response.body(), operation);
+        return transport.send(request);
     }
 
     static String encode(Map<String, List<String>> form) {
@@ -164,7 +174,7 @@ final class TokenEndpoint {
         throw invalid(operation + " response has a " + field + " that is not a string");
     }
 
-    private static @Nullable Map<String, Object> parseObjectOrNull(String body) {
+    static @Nullable Map<String, Object> parseObjectOrNull(String body) {
         try {
             return JSONObjectUtils.parse(body);
         } catch (ParseException e) {
