@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# WebIdentity Integration Tests and device row 7 against a live zone. The zone fetches the
+# public key from a jwks_uri, so this serves only the public key set through a temporary
+# cloudflared quick tunnel, registers a public-key credential on the engine application for
+# the run, and deletes the credential and stops the tunnel on exit. Needs cloudflared.
+source "$(dirname "$0")/env.sh"
+PORT=8797
+PUBLIC="$LIVE_DIR/jwks-public"
+mkdir -p "$PUBLIC/.well-known"
+"$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" webIdentityE2e --args="jwks $PUBLIC/.well-known/jwks.json"
+api() { env -u KEYCARD_SOCKET keycard agent api "$@" -z "$ZONE_ID" -o "$ORG_ID" < /dev/null; }
+: "${ZONE_ID:?set ZONE_ID}" "${ORG_ID:?set ORG_ID}"
+
+python3 -I -m http.server "$PORT" --bind 127.0.0.1 --directory "$PUBLIC" >/dev/null 2>&1 &
+SERVER=$!
+cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >"$LIVE_DIR/tunnel.log" 2>&1 &
+TUNNEL=$!
+CREDENTIAL=""
+cleanup() {
+  [ -n "$CREDENTIAL" ] && api "/zones/{zone}/application-credentials/$CREDENTIAL" -X DELETE -d '{}' >/dev/null
+  kill "$TUNNEL" "$SERVER" 2>/dev/null
+}
+trap cleanup EXIT
+
+for _ in $(seq 1 40); do
+  URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$LIVE_DIR/tunnel.log" | head -1 || true)
+  [ -n "$URL" ] && curl -sf -m 10 "$URL/.well-known/jwks.json" >/dev/null && break
+  sleep 3
+done
+ENGINE_APP="$(state engine_app)"
+CREDENTIAL=$(api '/zones/{zone}/application-credentials' -X POST -d "$(python3 -I -c '
+import json, sys
+print(json.dumps({"application_id": sys.argv[1], "type": "public-key",
+                  "identifier": "java-sdk-engine-web-identity", "jwks_uri": sys.argv[2] + "/.well-known/jwks.json"}))
+' "$ENGINE_APP" "$URL")" | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["id"])')
+
+export WEB_IDENTITY_CLIENT_ID=java-sdk-engine-web-identity
+"$ROOT/gradlew" -q -p "$ROOT/examples/engine-obo" webIdentityE2e --args=run

@@ -68,3 +68,13 @@ that the spec expects the zone to refuse. Each run adds registrations to the zon
 
 Production zones accept the malformed registration, and also register a confidential
 `client_secret_basic` client with a secret, so the refusal row fails against them today.
+
+## WebIdentity
+
+`bin/web-identity-e2e` runs the WebIdentity Integration Tests and device row 7. The zone fetches
+a public-key credential's keys from its `jwks_uri`, so the script serves only the public key set
+through a temporary `cloudflared` quick tunnel, registers the credential on the engine
+application for the run, and deletes it and stops the tunnel on exit. It needs `cloudflared`,
+`ZONE_ID` and `ORG_ID`. The rows: an exchange with the registered key, `invalid_client` for an
+unregistered key, a device authorization request, and `invalid_client` when that request's
+assertion is audienced to the token endpoint.

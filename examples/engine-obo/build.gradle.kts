@@ -46,3 +46,9 @@ tasks.register<JavaExec>("onboardingE2e") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("example.OnboardingE2e")
 }
+
+tasks.register<JavaExec>("webIdentityE2e") {
+    description = "Runs the WebIdentity rows against a live zone; pass the mode with --args."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("example.WebIdentityE2e")
+}
