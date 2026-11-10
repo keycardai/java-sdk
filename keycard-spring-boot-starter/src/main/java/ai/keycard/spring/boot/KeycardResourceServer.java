@@ -5,10 +5,12 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Objects;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
@@ -92,7 +94,21 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                     scopesSupported.forEach(builder::scope);
                 })));
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
+        // CSRF rides on cookies a browser attaches by itself, so a request with no Cookie header
+        // can't be one; skipping it there lets an unauthenticated POST get its 401 challenge
+        // instead of a CSRF 403. Cookie requests keep full protection, and a chain that disabled
+        // CSRF stays disabled.
+        CsrfConfigurer<HttpSecurity> csrf = csrfConfigurer(http);
+        if (csrf != null) {
+            csrf.ignoringRequestMatchers(request -> request.getHeader(HttpHeaders.COOKIE) == null);
+        }
         http.addFilterBefore(authorizationServerMetadata, BearerTokenAuthenticationFilter.class);
+    }
+
+    /** Spring keys configurers by raw class, so the lookup can't be typed. */
+    @SuppressWarnings("unchecked")
+    private static CsrfConfigurer<HttpSecurity> csrfConfigurer(HttpSecurity http) {
+        return http.getConfigurer(CsrfConfigurer.class);
     }
 
     /** Answers zone failures with 503 and no challenge; everything else gets the RFC 6750 challenge. */

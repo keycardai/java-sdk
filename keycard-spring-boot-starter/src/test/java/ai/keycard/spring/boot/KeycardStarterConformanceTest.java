@@ -2,6 +2,7 @@ package ai.keycard.spring.boot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import ai.keycard.oauth.AccessContext;
 import ai.keycard.oauth.JwtSigner;
@@ -67,6 +68,23 @@ class KeycardStarterConformanceTest {
             assertThat(result.getResponse().getHeader("WWW-Authenticate"))
                     .startsWith("Bearer")
                     .contains("resource_metadata=");
+        });
+    }
+
+    @Test
+    @DisplayName("P8: an unauthenticated POST is 401, not a CSRF 403; a cookie POST keeps CSRF")
+    void postWithoutToken() throws Exception {
+        withApp(DefaultChain.class, (zone, mvc) -> {
+            MvcResult bare = mvc.perform(post("/echo")).andReturn();
+            assertThat(bare.getResponse().getStatus()).isEqualTo(401);
+            assertThat(bare.getResponse().getHeader("WWW-Authenticate")).contains("resource_metadata=");
+            MvcResult authorized = mvc.perform(
+                            post("/echo").header("Authorization", "Bearer " + token(zone, "read", AUDIENCE)))
+                    .andReturn();
+            assertThat(authorized.getResponse().getStatus()).isEqualTo(200);
+            MvcResult cookie = mvc.perform(post("/echo").cookie(new jakarta.servlet.http.Cookie("SESSION", "x")))
+                    .andReturn();
+            assertThat(cookie.getResponse().getStatus()).isEqualTo(403);
         });
     }
 
@@ -251,6 +269,11 @@ class KeycardStarterConformanceTest {
         @GetMapping("/me")
         String me(@AuthenticationPrincipal Jwt jwt, org.springframework.security.core.Authentication auth) {
             return jwt.getSubject() + " " + auth.getAuthorities();
+        }
+
+        @org.springframework.web.bind.annotation.PostMapping("/echo")
+        String echo(@AuthenticationPrincipal Jwt jwt) {
+            return jwt.getSubject();
         }
 
         @GetMapping("/both")

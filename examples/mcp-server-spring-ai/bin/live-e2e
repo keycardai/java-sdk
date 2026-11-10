@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# The grant Integration Tests against a live zone through Spring AI and the starter. Reuses
+# engine-obo's sandbox provisioning: the app runs as the engine application (v2 workload
+# credential, SPIRE JWT-SVID), the signed-in user's token calls it, and the downstream tool
+# exchanges for the ledger and for one resource registered nowhere.
+source "$(dirname "$0")/../../engine-obo/bin/env.sh"
+mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"
+export KEYCARD_AUDIENCES="$ENGINE_RESOURCE"
+export KEYCARD_CLIENT_ID="$ENGINE_V2_CLIENT_ID"
+export KEYCARD_ASSERTION_FILE="$SVID_FILE"
+export DOWNSTREAM_RESOURCES="$LEDGER_RESOURCE https://unregistered.java-sdk.test"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/mcp-server-spring-ai" liveE2e
