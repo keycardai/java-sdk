@@ -120,6 +120,48 @@ public final class AuthorizationServerMetadataCache {
     }
 
     /**
+     * The issuer's token endpoint, from cached metadata.
+     *
+     * <p>Metadata without a {@code token_endpoint} is a deterministic discovery failure: it is
+     * remembered for {@code negativeTtl} like any other, and discovery runs again after that.
+     *
+     * @param issuer the authorization server's issuer identifier
+     * @return the token endpoint
+     * @throws OAuthProtocolException with {@link OAuthProtocolException#INVALID_METADATA} when the
+     *     metadata has no token endpoint
+     * @throws KeycardException any discovery failure, as {@link #get(URI)} throws it
+     */
+    public URI tokenEndpoint(URI issuer) {
+        return requireEndpoint(issuer, "token_endpoint", AuthorizationServerMetadata::tokenEndpoint);
+    }
+
+    /**
+     * An endpoint from cached metadata, recording its absence as a deterministic failure.
+     *
+     * @param field the metadata field name, for the error message
+     * @param accessor reads the endpoint from the metadata
+     */
+    URI requireEndpoint(
+            URI issuer,
+            String field,
+            java.util.function.Function<AuthorizationServerMetadata, @Nullable URI> accessor) {
+        AuthorizationServerMetadata metadata = get(issuer);
+        URI endpoint = accessor.apply(metadata);
+        if (endpoint != null) {
+            return endpoint;
+        }
+        OAuthProtocolException missing = new OAuthProtocolException(
+                "metadata for " + issuer + " has no " + field, OAuthProtocolException.INVALID_METADATA);
+        String key = key(issuer);
+        if (negativeTtl.isZero()) {
+            entries.remove(key);
+        } else {
+            entries.put(key, new Entry(null, missing, clock.instant().plus(negativeTtl)));
+        }
+        throw missing;
+    }
+
+    /**
      * Drops the cached outcome for one issuer, so the next call fetches again.
      *
      * @param issuer the issuer to forget
