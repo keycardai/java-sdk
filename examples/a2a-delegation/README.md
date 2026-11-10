@@ -3,13 +3,13 @@
 Agent-to-agent delegation with `keycard-a2a`: one agent calls another on the user's behalf, and
 the user stays the subject at every hop.
 
-- **Agent B** speaks A2A through the official [a2a-java](https://github.com/a2aproject/a2a-java)
+- Agent B speaks A2A through the official [a2a-java](https://github.com/a2aproject/a2a-java)
   SDK (1.5.1). Its card is an a2a-java `AgentCard` serialized by a2a-java, and its JSON-RPC
   endpoint parses requests and writes replies with a2a-java's own codec (`JSONRPCUtils`). The
   endpoint sits behind `keycard-mcp`'s bearer filter, audience-bound to B's own URL. B answers
   with what it verified: the token's `sub`, `aud` and `act`, checked against the zone's keys
   rather than taken from the caller.
-- **Agent A** takes `POST /delegate` with a user's bearer token and a text body. It verifies the
+- Agent A takes `POST /delegate` with a user's bearer token and a text body. It verifies the
   token, then calls B with `DelegationClient`: discover B's card, exchange the user's token for
   one scoped to B (RFC 8693, authenticated with A's own credential), and send the message as
   A2A 1.0 `SendMessage`.
