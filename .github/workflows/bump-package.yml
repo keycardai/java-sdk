@@ -1,0 +1,70 @@
+name: Bump SDK Version
+
+on:
+  workflow_call:
+    inputs:
+      target_branch:
+        required: false
+        type: string
+        default: main
+        description: "Branch that receives the bump PR"
+      increment:
+        required: false
+        type: string
+        default: auto
+        description: "Optional forced increment: major, minor, or patch"
+  # Manual dispatch proves the pipeline without waiting for a real feature
+  # commit: force an increment and watch the bump PR open, merge and tag.
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        required: false
+        type: string
+        default: main
+      increment:
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The app is a bypass actor on the org require-review ruleset, which is
+      # what lets the script merge its own bump PR. GITHUB_TOKEN cannot do this,
+      # and a tag it pushed would not trigger release.yml either.
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SDK_RELEASE_APP_ID }}
+          private-key: ${{ secrets.SDK_RELEASE_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          fetch-depth: 0
+
+      - run: pip install commitizen==4.19.2
+
+      - name: Bump java-sdk
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          ARGS=(--target-branch "${{ inputs.target_branch }}")
+          if [[ "${{ inputs.increment }}" != "auto" && -n "${{ inputs.increment }}" ]]; then
+            ARGS+=(--increment "${{ inputs.increment }}")
+          fi
+          python3 scripts/bump_package.py java-sdk . "${ARGS[@]}"

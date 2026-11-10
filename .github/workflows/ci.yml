@@ -32,3 +32,21 @@ jobs:
       - run: examples/a2a-delegation/bin/selftest
       # The Spring AI MCP example behind the Spring Boot starter, against a stub zone.
       - run: examples/mcp-server-spring-ai/bin/selftest
+
+  release-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install commitizen==4.19.2
+      - name: Unit test the release scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Check .cz.toml against gradle.properties
+        run: python3 scripts/changelog.py check-drift
+      - name: Validate commit messages
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/changelog.py validate origin/${{ github.base_ref }}

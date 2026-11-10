@@ -1,0 +1,66 @@
+name: Merge to Main
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # commitizen's tag walk needs full history to find the last release.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: pip install commitizen==4.19.2
+
+      - name: Detect unreleased changes
+        id: changes
+        run: |
+          # The first release, v0.1.0, is tagged by hand (docs/releasing.md). Until
+          # it exists, commitizen would count every commit ever made and the first
+          # automated bump would skip straight to 0.2.0.
+          if [[ -z "$(git tag -l 'v*')" ]]; then
+            echo "::notice::No v* release tag yet; tag v0.1.0 by hand to start automated releases."
+            echo "changed=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(python3 scripts/changelog.py changes --output-format github)
+          echo "Unreleased: $CHANGED"
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      # The bump job is gated on the release app being configured, so without this
+      # the pipeline would sit skipped and silent.
+      - name: Warn when the release app is not configured
+        if: vars.SDK_RELEASE_APP_ID == '' && steps.changes.outputs.changed != '[]'
+        run: |
+          echo "::warning::There are unreleased changes but vars.SDK_RELEASE_APP_ID is unset, so no bump will run."
+
+  bump:
+    # Conditions, in order: something to release; not itself a bump (a bump PR's
+    # squash subject starts with "bump:", and bumping in response to a bump never
+    # ends); and the release app is configured.
+    if: >-
+      needs.detect-changes.outputs.changed != '[]'
+      && !startsWith(github.event.head_commit.message, 'bump:')
+      && vars.SDK_RELEASE_APP_ID != ''
+    needs: detect-changes
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/bump-package.yml
+    with:
+      target_branch: ${{ github.ref_name }}
+    secrets: inherit

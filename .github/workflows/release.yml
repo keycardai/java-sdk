@@ -1,0 +1,92 @@
+name: Release to Maven Central
+
+# Tag-triggered. bump_package.py creates v<version> at the bump PR's squash SHA
+# using the release app's token (app tokens fire workflow triggers, unlike
+# GITHUB_TOKEN); the first release's v0.1.0 is pushed by hand.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the version from the tag
+        id: release
+        run: |
+          INFO=$(python3 scripts/changelog.py package "${GITHUB_REF#refs/tags/}" --output-format github)
+          echo "$INFO"
+          echo "version=$(jq -r '.version' <<< "$INFO")" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tag against gradle.properties
+        env:
+          EXPECTED: ${{ steps.release.outputs.version }}
+        run: |
+          # A Central release can't be taken back, so refuse a tag that disagrees
+          # with the version the build would publish.
+          ACTUAL=$(sed -n 's/^version=//p' gradle.properties)
+          echo "tag says $EXPECTED, gradle.properties says $ACTUAL"
+          if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+            echo "::error::Tag version $EXPECTED does not match gradle.properties version $ACTUAL"
+            exit 1
+          fi
+          python3 scripts/changelog.py check-drift
+
+      - name: Check the release secrets
+        env:
+          CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          # Without a key the build would publish unsigned artifacts, which Central
+          # rejects after the upload; fail here instead.
+          for name in CENTRAL_USERNAME CENTRAL_PASSWORD SIGNING_KEY; do
+            if [[ -z "${!name}" ]]; then echo "::error::$name is not set in the release environment"; exit 1; fi
+          done
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Builds, tests and signs every module, uploads one deployment to the Central
+      # Portal and releases it.
+      - name: Publish to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew build publishAndReleaseToMavenCentral --no-configuration-cache --console=plain
+
+      - name: Wait for the release to resolve from Central
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          # The Portal publishes asynchronously. Waiting keeps a green run from
+          # meaning "uploaded but not yet resolvable".
+          URL="https://repo1.maven.org/maven2/ai/keycard/keycard-bom/$VERSION/keycard-bom-$VERSION.pom"
+          for _ in $(seq 1 90); do
+            if curl -sf -o /dev/null "$URL"; then echo "resolvable: $URL"; exit 0; fi
+            sleep 20
+          done
+          echo "::error::keycard-bom $VERSION did not resolve from Central within 30 minutes"
+          exit 1
