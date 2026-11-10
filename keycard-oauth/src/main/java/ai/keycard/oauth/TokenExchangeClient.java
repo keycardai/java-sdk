@@ -113,7 +113,8 @@ public final class TokenExchangeClient {
             throw new ConfigurationException("exchangeToken(subjectToken, resource) needs a credential");
         }
         TokenExchangeRequest request =
-                credential.prepareTokenExchangeRequest(TokenExchangeContext.of(subjectToken, resource, issuer));
+                credential.prepareTokenExchangeRequest(TokenExchangeContext.of(subjectToken, resource, issuer)
+                        .withTokenEndpoint(metadata.tokenEndpoint(issuer)));
         if (scope != null) {
             request = request.toBuilder().scope(scope).build();
         }
@@ -189,7 +190,7 @@ public final class TokenExchangeClient {
      * A client for another zone sharing this one's credential, actor, transport and caches (the
      * caches are keyed by issuer, so zones stay isolated). With a multi-zone {@link ClientSecret},
      * the new zone's pair is used, and a zone the credential doesn't hold fails closed before any
-     * request.
+     * token request.
      *
      * @param zoneIssuer the other zone's issuer
      * @return the client for that zone
