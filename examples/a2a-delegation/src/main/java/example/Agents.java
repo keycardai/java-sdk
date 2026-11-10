@@ -38,7 +38,7 @@ public final class Agents implements AutoCloseable {
         URI aUrl = URI.create("http://127.0.0.1:" + (portA == 0 ? freePort() : portA));
 
         ServletContextHandler bContext = new ServletContextHandler();
-        AgentB.mount(bContext, bUrl, TokenVerifier.builder(zone).audiences(bUrl.toString()).build());
+        AgentB.mount(bContext, AgentB.NAME, bUrl, TokenVerifier.builder(zone).audiences(bUrl.toString()).build(), null);
         Server b = server(bUrl, bContext);
 
         ServletContextHandler aContext = new ServletContextHandler();
@@ -49,7 +49,7 @@ public final class Agents implements AutoCloseable {
         return new Agents(a, b);
     }
 
-    private static Server server(URI url, ServletContextHandler context) throws Exception {
+    static Server server(URI url, ServletContextHandler context) throws Exception {
         Server server = new Server(new InetSocketAddress("127.0.0.1", url.getPort()));
         server.setHandler(context);
         server.start();
@@ -86,7 +86,7 @@ public final class Agents implements AutoCloseable {
         b.stop();
     }
 
-    private static URI url(Server server) {
+    static URI url(Server server) {
         return URI.create("http://127.0.0.1:" + ((ServerConnector) server.getConnectors()[0]).getLocalPort());
     }
 

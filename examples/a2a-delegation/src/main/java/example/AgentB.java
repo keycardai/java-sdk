@@ -1,8 +1,12 @@
 package example;
 
+import ai.keycard.a2a.A2aProtocol;
+import ai.keycard.a2a.DelegationClient;
+import ai.keycard.a2a.DelegationResult;
 import ai.keycard.mcp.KeycardRequest;
 import ai.keycard.mcp.RequireBearerAuthFilter;
 import ai.keycard.oauth.AccessToken;
+import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.TokenVerifier;
 import com.google.protobuf.util.JsonFormat;
 import jakarta.servlet.DispatcherType;
@@ -43,20 +47,28 @@ final class AgentB {
 
     static final String NAME = "Agent B";
 
+    /** A next hop: B delegates to it with its own credential and appends its reply. */
+    record Forward(DelegationClient delegation, URI next) {}
+
     private AgentB() {}
 
-    /** Mounts B on a context served at {@code baseUrl}, trusting tokens from {@code verifier}. */
-    static void mount(ServletContextHandler context, URI baseUrl, TokenVerifier verifier) {
-        context.addServlet(new ServletHolder(new Card(baseUrl)), "/.well-known/agent-card.json");
+    /** Mounts an agent on a context served at {@code baseUrl}, trusting tokens from {@code verifier}. */
+    static void mount(
+            ServletContextHandler context,
+            String name,
+            URI baseUrl,
+            TokenVerifier verifier,
+            Forward forward) {
+        context.addServlet(new ServletHolder(new Card(name, baseUrl)), "/.well-known/agent-card.json");
         FilterHolder bearer = new FilterHolder(RequireBearerAuthFilter.builder(verifier).build());
         context.addFilter(bearer, "/a2a/jsonrpc", EnumSet.of(DispatcherType.REQUEST));
-        context.addServlet(new ServletHolder(new JsonRpc()), "/a2a/jsonrpc");
+        context.addServlet(new ServletHolder(new JsonRpc(name, forward)), "/a2a/jsonrpc");
     }
 
-    static AgentCard card(URI baseUrl) {
+    static AgentCard card(String name, URI baseUrl) {
         String base = baseUrl.toString().replaceAll("/$", "");
         return AgentCard.builder()
-                .name(NAME)
+                .name(name)
                 .description("Reports the identity it verified on each delegated call")
                 .version("0.1.0")
                 .capabilities(AgentCapabilities.builder().streaming(false).build())
@@ -80,9 +92,10 @@ final class AgentB {
         /** The card's JSON. */
         private final String json;
 
-        Card(URI baseUrl) {
+        Card(String name, URI baseUrl) {
             try {
-                this.json = ProtoJsonUtils.toJson(JsonFormat.printer(), ProtoUtils.ToProto.agentCard(card(baseUrl)));
+                this.json =
+                        ProtoJsonUtils.toJson(JsonFormat.printer(), ProtoUtils.ToProto.agentCard(card(name, baseUrl)));
             } catch (Exception e) {
                 throw new IllegalStateException("could not serialize the agent card", e);
             }
@@ -99,6 +112,17 @@ final class AgentB {
     static final class JsonRpc extends HttpServlet {
 
         private static final long serialVersionUID = 1L;
+
+        /** The agent's name, reported in its reply. */
+        private final String name;
+
+        /** Where to delegate next, if anywhere. */
+        private final transient Forward forward;
+
+        JsonRpc(String name, Forward forward) {
+            this.name = name;
+            this.forward = forward;
+        }
 
         @Override
         protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
@@ -119,8 +143,17 @@ final class AgentB {
             }
             Message incoming = send.getParams().message();
             AccessToken caller = KeycardRequest.accessToken(request).orElseThrow();
-            String reply = "verified sub=" + caller.subject() + " aud=" + caller.audiences() + " act="
+            String reply = name + " verified sub=" + caller.subject() + " aud=" + caller.audiences() + " act="
                     + caller.claims().get("act") + " role=" + incoming.role() + " text=" + firstText(incoming);
+            if (forward != null) {
+                try {
+                    DelegationResult next = forward.delegation()
+                            .invoke(forward.next(), caller.token(), A2aProtocol.textMessage(firstText(incoming)));
+                    reply += " | " + next.text().orElse("(no text)");
+                } catch (KeycardException e) {
+                    reply += " | delegation failed: " + e.getMessage();
+                }
+            }
             Message answer = Message.builder()
                     .role(Message.Role.ROLE_AGENT)
                     .parts(new TextPart(reply, null))

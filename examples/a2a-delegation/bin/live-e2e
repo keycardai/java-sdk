@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The a2a-delegation Integration Tests against a live zone, reusing engine-obo's
+# sandbox provisioning and signed-in user token: A runs as the engine, B as the
+# gateway (both with fresh JWT-SVIDs), and C reports what it verified.
+source "$(dirname "$0")/../../engine-obo/bin/env.sh"
+mint_svid spiffe://java-sdk.test/engine "$SVID_FILE"
+mint_svid spiffe://java-sdk.test/gateway "$GATEWAY_SVID_FILE"
+exec "$ROOT/gradlew" -q -p "$ROOT/examples/a2a-delegation" liveE2e
