@@ -9,6 +9,9 @@ junit = "6.1.3"
 nimbus-jose-jwt = "10.10"
 palantir-java-format = "2.103.0"
 spotless = "8.11.0"
+spring-boot = "4.1.2"
+spring-framework = "7.0.10"
+spring-security = "7.1.2"
 vanniktech-maven-publish = "0.37.0"
 
 [libraries]
@@ -21,6 +24,14 @@ jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure", version.ref = "spring-boot" }
+spring-boot-starter-oauth2-resource-server = { module = "org.springframework.boot:spring-boot-starter-oauth2-resource-server", version.ref = "spring-boot" }
+spring-boot-test = { module = "org.springframework.boot:spring-boot-test", version.ref = "spring-boot" }
+spring-webmvc = { module = "org.springframework:spring-webmvc", version.ref = "spring-framework" }
+spring-test = { module = "org.springframework:spring-test", version.ref = "spring-framework" }
+spring-security-test = { module = "org.springframework.security:spring-security-test", version.ref = "spring-security" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind", version = "3.1.7" }
+jakarta-servlet-api-x61 = { module = "jakarta.servlet:jakarta.servlet-api", version = "6.1.0" }
 nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbus-jose-jwt" }
 
 # Plugins applied by the convention plugins in build-logic, on its classpath.

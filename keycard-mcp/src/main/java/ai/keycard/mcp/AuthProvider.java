@@ -145,6 +145,28 @@ public final class AuthProvider {
     }
 
     /**
+     * Exchanges a verified caller's token for one token per resource at the zone that issued it,
+     * recording each token or failure in {@code into}. Framework integrations call this with the
+     * token their own verification produced; it never throws for a failed exchange.
+     *
+     * @param into the context to fill; tokens and errors from earlier grants stay
+     * @param tokenIssuer the {@code iss} of the caller's verified token
+     * @param subjectToken the caller's raw token
+     * @param resources the downstream resources, as absolute URIs
+     * @param scopes the space-separated scopes to request per resource, or {@code null} for the
+     *     server's defaults
+     * @throws ConfigurationException when no resource is given or one isn't an absolute URI
+     */
+    public void exchangeInto(
+            AccessContext into,
+            String tokenIssuer,
+            String subjectToken,
+            List<String> resources,
+            Function<String, @Nullable String> scopes) {
+        exchange(into, tokenIssuer, subjectToken, checkResources(resources), null, scopes);
+    }
+
+    /**
      * Fills {@code context} with one exchange per resource. Each failure is recorded against its
      * resource; a zone this provider doesn't serve is recorded as a context-wide error.
      */
