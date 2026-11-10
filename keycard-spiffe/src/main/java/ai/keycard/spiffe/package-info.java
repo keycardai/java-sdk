@@ -4,6 +4,8 @@
  * <p>Fetches JWT-SVIDs for use as client assertions and actor tokens. It lives apart from
  * {@code keycard-oauth} because the SPIFFE client library pulls in gRPC at runtime. Workloads
  * that run spiffe-helper can read the SVID from a file through {@code keycard-oauth} alone.
+ *
+ * <p><b>Preview:</b> proposed for the shared SDK specification and subject to change.
  */
 @NullMarked
 package ai.keycard.spiffe;

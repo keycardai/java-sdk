@@ -275,6 +275,13 @@ public final class TokenExchangeClient {
          * its own. The zone verifies it like a workload-identity client assertion and nests it in
          * the issued token's {@code act} claim. Never sent on {@link #impersonate}.
          *
+         * <p><b>Preview.</b> This option is proposed for the shared SDK specification and not yet
+         * settled there. Today the zone accepts only an external workload JWT as the actor, matched
+         * against a v1 token credential (resolved by issuer and subject); a v2 credential can't be
+         * an actor. That rule may change, and this option with it. To record the calling workload
+         * in {@code act} without an actor token, authenticate with {@link WorkloadIdentity} alone:
+         * the zone then names the caller as the actor.
+         *
          * @param actor supplies the actor's JWT, such as a SPIFFE JWT-SVID
          * @return this builder
          */

@@ -22,6 +22,10 @@ import org.jspecify.annotations.Nullable;
  * agent, for example), for use as a {@code WorkloadIdentity} client assertion or a token-exchange
  * actor token.
  *
+ * <p><b>Preview.</b> This source is proposed for the shared SDK specification and not yet settled
+ * there, and the zone's rules for SVIDs used as actor tokens may change. Using the SVID as a
+ * {@code WorkloadIdentity} client assertion is the stable path.
+ *
  * <pre>{@code
  * try (SpiffeJwtSvidSource svids = SpiffeJwtSvidSource.builder("https://acme.keycard.cloud").build()) {
  *     TokenExchangeClient client = TokenExchangeClient.builder(URI.create("https://acme.keycard.cloud"))
