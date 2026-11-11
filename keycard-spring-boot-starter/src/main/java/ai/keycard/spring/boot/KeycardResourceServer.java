@@ -5,12 +5,15 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Objects;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.BearerTokenErrors;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -79,7 +82,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
 
     @Override
     public void init(HttpSecurity http) {
-        BearerTokenAuthenticationEntryPoint challenge = new BearerTokenAuthenticationEntryPoint();
+        AuthenticationEntryPoint challenge = new SchemeAwareEntryPoint(new BearerTokenAuthenticationEntryPoint());
         http.oauth2ResourceServer(resourceServer -> resourceServer
                 .jwt(jwt -> jwt.decoder(decoder))
                 .bearerTokenResolver(new StrictBearerTokenResolver())
@@ -101,6 +104,48 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                 })));
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
         http.addFilterBefore(authorizationServerMetadata, BearerTokenAuthenticationFilter.class);
+    }
+
+    /**
+     * The RFC 6750 challenge, with {@code invalid_token} when the request carried an {@code
+     * Authorization} header in some other scheme, as the servlet filter answers.
+     *
+     * <p>This lives in the challenge rather than the token resolver on purpose: Spring runs the
+     * resolver on every request, so rejecting other schemes there would also refuse {@code
+     * permitAll()} paths and break a chain that signs people in with Basic. The challenge is only
+     * written for a protected path with no authenticated caller, where a Basic header that
+     * authenticated never arrives.
+     */
+    static final class SchemeAwareEntryPoint implements AuthenticationEntryPoint {
+
+        private final AuthenticationEntryPoint delegate;
+
+        SchemeAwareEntryPoint(AuthenticationEntryPoint delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void commence(
+                jakarta.servlet.http.HttpServletRequest request,
+                jakarta.servlet.http.HttpServletResponse response,
+                AuthenticationException exception)
+                throws IOException, jakarta.servlet.ServletException {
+            AuthenticationException reported = exception;
+            if (!(exception instanceof OAuth2AuthenticationException) && otherScheme(request)) {
+                reported = new OAuth2AuthenticationException(
+                        BearerTokenErrors.invalidToken("unsupported authorization scheme"));
+            }
+            delegate.commence(request, response, reported);
+        }
+
+        private static boolean otherScheme(jakarta.servlet.http.HttpServletRequest request) {
+            String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+            if (header == null || header.isBlank()) {
+                return false;
+            }
+            String scheme = header.trim().split("\\s+", 2)[0];
+            return !scheme.equalsIgnoreCase("bearer");
+        }
     }
 
     /** Answers zone failures with 503 and no challenge; everything else gets the RFC 6750 challenge. */

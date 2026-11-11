@@ -90,6 +90,49 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("P8: another scheme on a protected path is 401 invalid_token, as the servlet filter answers")
+    void otherSchemeIsInvalidToken() throws Exception {
+        withApp(DefaultChain.class, (zone, mvc) -> {
+            MvcResult basic = mvc.perform(get("/me").header("Authorization", "Basic dTpw"))
+                    .andReturn();
+            assertThat(basic.getResponse().getStatus()).isEqualTo(401);
+            assertThat(basic.getResponse().getHeader("WWW-Authenticate"))
+                    .contains("error=\"invalid_token\"")
+                    .contains("resource_metadata=");
+            MvcResult none = mvc.perform(get("/me")).andReturn();
+            assertThat(none.getResponse().getHeader("WWW-Authenticate")).doesNotContain("error=");
+        });
+    }
+
+    @Test
+    @DisplayName("another scheme still reaches a permitAll path; the challenge only speaks for protected ones")
+    void otherSchemeOnPublicPath() throws Exception {
+        withApp(PublicChain.class, (zone, mvc) -> {
+            MvcResult open = mvc.perform(get("/public/ping").header("Authorization", "Digest x"))
+                    .andReturn();
+            assertThat(open.getResponse().getStatus()).isEqualTo(200);
+        });
+    }
+
+    @Test
+    @DisplayName("Basic sign-in in the same chain as Keycard still works, and so do bearer tokens")
+    void basicBesideKeycard() throws Exception {
+        withApp(MixedChain.class, (zone, mvc) -> {
+            MvcResult admin = mvc.perform(get("/admin/ping")
+                            .header(
+                                    "Authorization",
+                                    "Basic "
+                                            + java.util.Base64.getEncoder()
+                                                    .encodeToString("admin:pw"
+                                                            .getBytes(java.nio.charset.StandardCharsets.UTF_8))))
+                    .andReturn();
+            assertThat(admin.getResponse().getStatus()).isEqualTo(200);
+            MvcResult bearer = perform(mvc, "/me", token(zone, "read", AUDIENCE));
+            assertThat(bearer.getResponse().getStatus()).isEqualTo(200);
+        });
+    }
+
+    @Test
     @DisplayName("the configurer leaves an application chain's CSRF on: a POST without a CSRF token is 403")
     void applicationChainKeepsCsrf() throws Exception {
         withApp(ScopedChain.class, (zone, mvc) -> {
@@ -261,6 +304,70 @@ class KeycardStarterConformanceTest {
             return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_admin"))
                     .with(keycard, Customizer.withDefaults())
                     .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class PublicChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain open(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.requestMatchers("/public/**")
+                            .permitAll()
+                            .anyRequest()
+                            .authenticated())
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+
+        @Bean
+        Pings pings() {
+            return new Pings();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class MixedChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain mixed(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.requestMatchers("/public/**")
+                            .permitAll()
+                            .requestMatchers("/admin/**")
+                            .hasRole("ADMIN")
+                            .anyRequest()
+                            .authenticated())
+                    .httpBasic(Customizer.withDefaults())
+                    .csrf(csrf -> csrf.disable())
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+
+        @Bean
+        org.springframework.security.core.userdetails.UserDetailsService users() {
+            return new org.springframework.security.provisioning.InMemoryUserDetailsManager(
+                    org.springframework.security.core.userdetails.User.withUsername("admin")
+                            .password("{noop}pw")
+                            .roles("ADMIN")
+                            .build());
+        }
+
+        @Bean
+        Pings pings() {
+            return new Pings();
+        }
+    }
+
+    @RestController
+    static class Pings {
+
+        @GetMapping({"/public/ping", "/admin/ping"})
+        String ping() {
+            return "pong";
         }
     }
 
