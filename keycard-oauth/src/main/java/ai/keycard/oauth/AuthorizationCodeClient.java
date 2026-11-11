@@ -241,6 +241,11 @@ public final class AuthorizationCodeClient {
      */
     public TokenResponse complete(
             Map<String, String> callbackParams, String state, String codeVerifier, URI redirectUri) {
+        // State first: an error redirect without our state could come from anyone, and reporting
+        // it would let a forged redirect end the sign-in.
+        if (!stateMatches(callbackParams, state)) {
+            throw new OAuthProtocolException("the callback's state does not match the stored value", "state_mismatch");
+        }
         String error = callbackParams.get("error");
         if (error != null && !error.isEmpty()) {
             String description = callbackParams.get("error_description");
@@ -251,12 +256,6 @@ public final class AuthorizationCodeClient {
                     error,
                     description,
                     callbackParams.get("error_uri"));
-        }
-        String received = callbackParams.get("state");
-        if (received == null
-                || !MessageDigest.isEqual(
-                        received.getBytes(StandardCharsets.UTF_8), state.getBytes(StandardCharsets.UTF_8))) {
-            throw new OAuthProtocolException("the callback's state does not match the stored value", "state_mismatch");
         }
         String code = callbackParams.get("code");
         if (code == null || code.isEmpty()) {
@@ -313,15 +312,35 @@ public final class AuthorizationCodeClient {
     public TokenResponse authenticate(Loopback options) {
         HttpServer server;
         try {
-            server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), options.port), 0);
+            // The redirect URI names 127.0.0.1, so bind exactly that; getLoopbackAddress() can be ::1.
+            server = HttpServer.create(
+                    new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), options.port), 0);
         } catch (IOException e) {
             throw new ConfigurationException("could not listen on 127.0.0.1:" + options.port, e);
         }
         URI redirectUri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + options.callbackPath);
+        WebAppFlow flow;
+        try {
+            flow = begin(redirectUri, options.scopes, options.resources);
+        } catch (RuntimeException e) {
+            server.stop(0);
+            throw e;
+        }
         CompletableFuture<Map<String, String>> callback = new CompletableFuture<>();
         server.createContext(options.callbackPath, exchange -> {
             try (exchange) {
-                callback.complete(queryParams(exchange.getRequestURI().getRawQuery()));
+                Map<String, String> params =
+                        queryParams(exchange.getRequestURI().getRawQuery());
+                // The context matches by prefix; only the exact path with our state ends the wait,
+                // so a stray or forged request can't cancel or hijack the sign-in.
+                boolean ours = "GET".equals(exchange.getRequestMethod())
+                        && options.callbackPath.equals(exchange.getRequestURI().getRawPath())
+                        && stateMatches(params, flow.state());
+                if (!ours) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+                callback.complete(params);
                 byte[] page = ("<!doctype html><title>Signed in</title>"
                                 + "<p>You can close this window and return to the application.</p>")
                         .getBytes(StandardCharsets.UTF_8);
@@ -332,7 +351,6 @@ public final class AuthorizationCodeClient {
         });
         server.start();
         try {
-            WebAppFlow flow = begin(redirectUri, options.scopes, options.resources);
             options.browser.open(flow.url());
             Map<String, String> params;
             try {
@@ -347,8 +365,16 @@ public final class AuthorizationCodeClient {
             }
             return complete(params, flow.state(), flow.codeVerifier(), redirectUri);
         } finally {
-            server.stop(0);
+            // A one-second grace lets the browser finish reading the page instead of seeing a reset.
+            server.stop(1);
         }
+    }
+
+    private static boolean stateMatches(Map<String, String> callbackParams, String state) {
+        String received = callbackParams.get("state");
+        return received != null
+                && MessageDigest.isEqual(
+                        received.getBytes(StandardCharsets.UTF_8), state.getBytes(StandardCharsets.UTF_8));
     }
 
     private ClientAuthentication clientAuthentication(URI endpoint) {
@@ -371,6 +397,9 @@ public final class AuthorizationCodeClient {
         }
         if (credential instanceof WorkloadIdentity workload && workload.clientId() != null) {
             return workload.clientId();
+        }
+        if (credential instanceof WebIdentity web && web.clientId() != null) {
+            return web.clientId();
         }
         throw new ConfigurationException("the authorize URL needs a client id; this credential doesn't name one");
     }

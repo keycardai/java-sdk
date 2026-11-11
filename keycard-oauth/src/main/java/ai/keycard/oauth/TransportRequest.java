@@ -79,4 +79,16 @@ public record TransportRequest(
         copy.put(name, value);
         return new TransportRequest(method, uri, copy, body, timeout);
     }
+
+    /**
+     * Names the method, URL, header names and body size, never header values or the body: they
+     * carry client secrets, assertions and tokens.
+     *
+     * @return a description without secrets
+     */
+    @Override
+    public String toString() {
+        return "TransportRequest[" + method + " " + uri + ", headers=" + headers.keySet() + ", body="
+                + (body == null ? "none" : body.length() + " chars") + ", timeout=" + timeout + "]";
+    }
 }

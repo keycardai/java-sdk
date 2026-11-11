@@ -75,7 +75,10 @@ final class JdkHttpTransport implements KeycardHttpTransport {
                             : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
             return builder.build();
         } catch (IllegalArgumentException e) {
-            throw new ConfigurationException("invalid request to " + request.uri() + ": " + e.getMessage(), e);
+            // The JDK's message quotes the offending header value, which may be a token; name only
+            // which header was refused, and leave the original out of the chain.
+            throw new ConfigurationException("invalid request to " + request.uri()
+                    + ": a header name or value is not allowed (for example, it holds a line break)");
         }
     }
 }

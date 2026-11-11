@@ -19,7 +19,8 @@ public interface KeyStorage {
     String load(String keyId);
 
     /**
-     * Stores a newly generated key.
+     * Stores a newly generated key. When a key is already stored under the id, an implementation
+     * may keep that one instead; callers load the key again after storing and use what comes back.
      *
      * @param keyId the key id
      * @param pem the PKCS#8 PEM text of the private key

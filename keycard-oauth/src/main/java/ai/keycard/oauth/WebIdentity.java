@@ -192,7 +192,10 @@ public final class WebIdentity implements Credential, ClientAuthenticator {
             RSAPrivateCrtKey privateKey =
                     (RSAPrivateCrtKey) generator.generateKeyPair().getPrivate();
             storage.store(keyId, pem("PRIVATE KEY", privateKey.getEncoded()));
-            return toJwk(privateKey);
+            // Another process may have stored its key first; use whatever the storage kept, so
+            // every process signs with the key the zone was told about.
+            String stored = storage.load(keyId);
+            return stored != null ? parse(stored) : toJwk(privateKey);
         } catch (GeneralSecurityException e) {
             throw new ConfigurationException("cannot generate an RSA key", e);
         }
