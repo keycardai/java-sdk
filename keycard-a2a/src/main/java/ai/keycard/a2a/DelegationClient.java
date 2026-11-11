@@ -9,12 +9,16 @@ import ai.keycard.oauth.TransportRequest;
 import ai.keycard.oauth.TransportResponse;
 import com.nimbusds.jose.util.JSONObjectUtils;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.text.ParseException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
@@ -34,6 +38,10 @@ import org.jspecify.annotations.Nullable;
  * <p>Speaks A2A 1.0 ({@code SendMessage}, {@code A2A-Version: 1.0}) unless built with the 0.3
  * opt-in, which switches the method, header, roles, part shape and preferred card interface
  * together. Safe to share between threads.
+ *
+ * <p>The exchanged token is scoped to the target, so it is only ever sent to the target's own
+ * origin. A card that names a JSON-RPC endpoint on another origin is refused before any exchange,
+ * unless that origin is listed with {@link Builder#trustedEndpointOrigins}.
  */
 public final class DelegationClient {
 
@@ -42,6 +50,7 @@ public final class DelegationClient {
     private final KeycardHttpTransport transport;
     private final Duration invokeTimeout;
     private final Wire wire;
+    private final Set<String> trustedOrigins;
 
     private DelegationClient(Builder builder) {
         this.wire = Wire.of(builder.protocolVersion);
@@ -58,6 +67,7 @@ public final class DelegationClient {
                         .build();
         this.transport = builder.transport;
         this.invokeTimeout = builder.invokeTimeout;
+        this.trustedOrigins = Set.copyOf(builder.trustedOrigins);
     }
 
     /**
@@ -91,10 +101,10 @@ public final class DelegationClient {
         Objects.requireNonNull(params, "params");
         AgentCard card = discovery.getCard(target);
         String base = ServiceDiscovery.key(target);
+        // Resolve and vet the endpoint before exchanging, so a bad card never costs a token.
+        URI url = endpoint(target, card, base);
         String token = exchange.exchangeToken(subjectToken, URI.create(base)).accessToken();
-        String endpoint = wire.endpointFrom(card);
-        URI url = URI.create(endpoint != null ? endpoint : base + A2aProtocol.JSONRPC_PATH);
-        return new DelegationResult(call(url, token, params), card);
+        return new DelegationResult(wire.decodeResult(call(url, token, params)), card);
     }
 
     /**
@@ -104,6 +114,45 @@ public final class DelegationClient {
      */
     public String protocolVersion() {
         return wire.version();
+    }
+
+    private URI endpoint(URI target, AgentCard card, String base) {
+        String advertised = wire.endpointFrom(card);
+        if (advertised == null) {
+            return URI.create(base + A2aProtocol.JSONRPC_PATH);
+        }
+        URI url;
+        try {
+            url = new URI(advertised);
+        } catch (URISyntaxException e) {
+            throw new A2aDiscoveryException(
+                    "the agent card for " + base + " names an endpoint that is not a URL", e, false);
+        }
+        String scheme = url.getScheme() == null ? "" : url.getScheme().toLowerCase(Locale.ROOT);
+        if (!url.isAbsolute() || url.getHost() == null || !(scheme.equals("https") || scheme.equals("http"))) {
+            throw new A2aDiscoveryException(
+                    "the agent card for " + base + " names an endpoint that is not an absolute http(s) URL",
+                    null,
+                    false);
+        }
+        String origin = origin(url);
+        if (!origin.equals(origin(target)) && !trustedOrigins.contains(origin)) {
+            throw new A2aDiscoveryException(
+                    "the agent card for " + base + " names an endpoint on " + origin
+                            + ", another origin; the token scoped to the target is only sent to the target's origin"
+                            + " or one listed in trustedEndpointOrigins",
+                    null,
+                    false);
+        }
+        return url;
+    }
+
+    /** {@code scheme://host:port}, lowercased, with the default port written out. */
+    static String origin(URI url) {
+        String scheme = url.getScheme() == null ? "" : url.getScheme().toLowerCase(Locale.ROOT);
+        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
+        int port = url.getPort() != -1 ? url.getPort() : scheme.equals("https") ? 443 : scheme.equals("http") ? 80 : -1;
+        return scheme + "://" + host + ":" + port;
     }
 
     private Map<String, Object> call(URI url, String token, Map<String, Object> params) {
@@ -124,24 +173,28 @@ public final class DelegationClient {
             throw new A2aInvocationException(
                     "invocation of " + url + " failed: " + e.getMessage(), e, e.retryable(), 0, null);
         }
+        Map<String, Object> document = parse(response.body());
+        Map<String, Object> rpcError =
+                document != null && document.get("error") instanceof Map<?, ?> error ? stringKeys(error) : null;
         if (!response.isSuccess()) {
+            // Agents often answer a JSON-RPC error with a 4xx or 5xx; keep the error object.
             throw new A2aInvocationException(
-                    "invocation of " + url + " returned HTTP " + response.status(),
+                    "invocation of " + url + " returned HTTP " + response.status()
+                            + (rpcError == null ? "" : " with a JSON-RPC error: " + rpcError.get("message")),
                     null,
                     HttpStatusException.isRetryableStatus(response.status()),
                     response.status(),
+                    rpcError);
+        }
+        if (document == null) {
+            throw new A2aInvocationException(
+                    "invocation of " + url + " returned a body that is not a JSON object",
+                    null,
+                    false,
+                    response.status(),
                     null);
         }
-        Map<String, Object> document;
-        try {
-            document = JSONObjectUtils.parse(response.body());
-        } catch (ParseException e) {
-            throw new A2aInvocationException(
-                    "invocation of " + url + " returned a body that is not JSON", e, false, response.status(), null);
-        }
-        if (document.get("error") instanceof Map<?, ?> error) {
-            Map<String, Object> rpcError = new LinkedHashMap<>();
-            error.forEach((key, value) -> rpcError.put(String.valueOf(key), value));
+        if (rpcError != null) {
             throw new A2aInvocationException(
                     "invocation of " + url + " returned a JSON-RPC error: " + rpcError.get("message"),
                     null,
@@ -153,8 +206,21 @@ public final class DelegationClient {
             throw new A2aInvocationException(
                     "invocation of " + url + " returned no JSON-RPC result", null, false, response.status(), null);
         }
+        return stringKeys(result);
+    }
+
+    /** The body as a JSON object, or null when it is not one (including a JSON {@code null}). */
+    private static @Nullable Map<String, Object> parse(String body) {
+        try {
+            return JSONObjectUtils.parse(body);
+        } catch (ParseException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Map<String, Object> stringKeys(Map<?, ?> map) {
         Map<String, Object> out = new LinkedHashMap<>();
-        result.forEach((key, value) -> out.put(String.valueOf(key), value));
+        map.forEach((key, value) -> out.put(String.valueOf(key), value));
         return out;
     }
 
@@ -168,6 +234,7 @@ public final class DelegationClient {
         private Duration invokeTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private @Nullable ServiceDiscovery discovery;
         private String protocolVersion = A2aProtocol.PROTOCOL_VERSION;
+        private final Set<String> trustedOrigins = new LinkedHashSet<>();
 
         private Builder(URI issuer) {
             this.issuer = Objects.requireNonNull(issuer, "issuer");
@@ -258,6 +325,26 @@ public final class DelegationClient {
          * @throws ai.keycard.oauth.ConfigurationException when the credential is missing or the
          *     protocol version is unknown
          */
+        /**
+         * Origins, other than each target's own, that a card may name as its JSON-RPC endpoint,
+         * such as a gateway in front of several agents. The token exchanged for a target is sent
+         * there, so list only origins you trust with every target's token.
+         *
+         * @param origins origins such as {@code https://gateway.example}; any path is ignored
+         * @return this builder
+         */
+        public Builder trustedEndpointOrigins(URI... origins) {
+            for (URI origin : origins) {
+                Objects.requireNonNull(origin, "origin");
+                if (!origin.isAbsolute() || origin.getHost() == null) {
+                    throw new ai.keycard.oauth.ConfigurationException(
+                            "a trusted endpoint origin must be an absolute URL, got " + origin);
+                }
+                trustedOrigins.add(origin(origin));
+            }
+            return this;
+        }
+
         public DelegationClient build() {
             if (credential == null) {
                 throw new ai.keycard.oauth.ConfigurationException("a delegation client needs the agent's credential");

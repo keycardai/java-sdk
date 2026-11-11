@@ -91,6 +91,33 @@ class SpiffeJwtSvidSourceTest {
     }
 
     @Test
+    @DisplayName("a closed source refuses to fetch instead of opening a new Workload API connection")
+    void closedSourceRefuses() {
+        SpiffeJwtSvidSource unopened = SpiffeJwtSvidSource.builder(AUDIENCE)
+                .socketPath("unix:///nonexistent/agent.sock")
+                .build();
+        unopened.close();
+        assertThatThrownBy(unopened::identityToken)
+                .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+                    assertThat(e.retryable()).isFalse();
+                    assertThat(e.getMessage()).contains("closed");
+                });
+    }
+
+    @Test
+    @DisplayName("an unchecked failure from the SVID source, such as a source closed elsewhere, is a typed error")
+    void uncheckedFailureIsTyped() {
+        FakeSource fake = new FakeSource(ENGINE);
+        fake.crash = new IllegalStateException("JWT SVID source is closed");
+        SpiffeJwtSvidSource source =
+                SpiffeJwtSvidSource.builder(AUDIENCE).jwtSvidSource(fake).build();
+        assertThatThrownBy(source::identityToken).isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+            assertThat(e.retryable()).isFalse();
+            assertThat(e.getCause()).isSameAs(fake.crash);
+        });
+    }
+
+    @Test
     @DisplayName("a blank audience, bad SPIFFE ID or bad socket address is a configuration error")
     void configurationErrors() {
         assertThatThrownBy(() -> SpiffeJwtSvidSource.builder(" "))
@@ -155,6 +182,7 @@ class SpiffeJwtSvidSourceTest {
         private final ECKey key;
         private final List<String> calls = new ArrayList<>();
         private JwtSvidException failure;
+        private RuntimeException crash;
 
         FakeSource(String spiffeId) {
             this.spiffeId = spiffeId;
@@ -192,6 +220,9 @@ class SpiffeJwtSvidSourceTest {
         private JwtSvid issue(String audience) throws JwtSvidException {
             if (failure != null) {
                 throw failure;
+            }
+            if (crash != null) {
+                throw crash;
             }
             try {
                 SignedJWT jwt = new SignedJWT(

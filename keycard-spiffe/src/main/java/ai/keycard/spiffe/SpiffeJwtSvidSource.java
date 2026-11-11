@@ -58,7 +58,11 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
     private final @Nullable String socketPath;
     private final Duration initTimeout;
     private final boolean ownsSource;
-    private @Nullable JwtSvidSource source;
+    /** Serializes opening the connection, apart from {@code this}, so close() never waits on it. */
+    private final Object openLock = new Object();
+
+    private volatile boolean closed;
+    private volatile @Nullable JwtSvidSource source;
 
     private SpiffeJwtSvidSource(Builder builder) {
         this.audience = builder.audience;
@@ -90,12 +94,17 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
     @Override
     public String identityToken() {
         JwtSvid svid;
+        JwtSvidSource jwtSource = source();
         try {
-            JwtSvidSource jwtSource = source();
             svid = spiffeId == null ? jwtSource.fetchJwtSvid(audience) : jwtSource.fetchJwtSvid(spiffeId, audience);
         } catch (JwtSvidException e) {
             throw new WorkloadIdentityRuntimeException(
                     "the SPIFFE Workload API could not issue a JWT-SVID for " + audience, SOURCE, e, true);
+        } catch (RuntimeException e) {
+            // java-spiffe throws IllegalStateException from a source that was closed, here or by
+            // whoever injected it; retrying the same source won't help.
+            throw new WorkloadIdentityRuntimeException(
+                    "the SPIFFE JWT-SVID source is unusable: " + e.getMessage(), SOURCE, e, false);
         }
         String token = svid.getToken();
         if (token == null || token.isEmpty()) {
@@ -105,17 +114,38 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
         return token;
     }
 
-    /** Closes the Workload API connection this source opened. An injected source is left open. */
+    /**
+     * Closes the Workload API connection this source opened, and a later fetch fails rather than
+     * opening a new one. A close during a first fetch's connection attempt returns at once, and
+     * the connection is closed as soon as it opens. With an injected source this does nothing:
+     * its owner closes it.
+     */
     @Override
-    public synchronized void close() {
-        if (ownsSource && source instanceof JwtSource jwtSource) {
+    public void close() {
+        if (!ownsSource) {
+            return;
+        }
+        JwtSvidSource opened;
+        synchronized (this) {
+            closed = true;
+            opened = source;
+            source = null;
+        }
+        closeQuietly(opened);
+    }
+
+    private static void closeQuietly(@Nullable JwtSvidSource opened) {
+        if (opened instanceof JwtSource jwtSource) {
             try {
                 jwtSource.close();
             } catch (IOException e) {
                 // nothing useful to do with a failed close
             }
-            source = null;
         }
+    }
+
+    private WorkloadIdentityRuntimeException closedError() {
+        return new WorkloadIdentityRuntimeException("the SPIFFE JWT-SVID source is closed", SOURCE, null, false);
     }
 
     @Override
@@ -123,16 +153,44 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
         return "SpiffeJwtSvidSource[audience=" + audience + ", spiffeId=" + spiffeId + "]";
     }
 
-    private synchronized JwtSvidSource source() {
-        if (source != null) {
-            return source;
+    private JwtSvidSource source() {
+        JwtSvidSource current = source;
+        if (current != null) {
+            return current;
         }
-        JwtSourceOptions.Builder options = JwtSourceOptions.builder().initTimeout(initTimeout);
+        if (closed) {
+            throw closedError();
+        }
+        synchronized (openLock) {
+            current = source;
+            if (current != null) {
+                return current;
+            }
+            if (closed) {
+                throw closedError();
+            }
+            JwtSvidSource opened = open();
+            synchronized (this) {
+                if (!closed) {
+                    source = opened;
+                    return opened;
+                }
+            }
+            closeQuietly(opened);
+            throw closedError();
+        }
+    }
+
+    private JwtSvidSource open() {
+        // java-spiffe waits in whole seconds and would turn 500 ms into no wait at all, so a
+        // fraction of a second rounds up.
+        long seconds = initTimeout.getSeconds() + (initTimeout.getNano() > 0 ? 1 : 0);
+        JwtSourceOptions.Builder options = JwtSourceOptions.builder().initTimeout(Duration.ofSeconds(seconds));
         if (socketPath != null) {
             options.spiffeSocketPath(socketPath);
         }
         try {
-            source = DefaultJwtSource.newSource(options.build());
+            return DefaultJwtSource.newSource(options.build());
         } catch (SocketEndpointAddressException e) {
             throw new WorkloadIdentityConfigurationException(
                     "invalid SPIFFE Workload API socket address: " + e.getMessage(), SOURCE, e);
@@ -145,7 +203,6 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
             throw new WorkloadIdentityConfigurationException(
                     "could not open the SPIFFE Workload API: " + e.getMessage(), SOURCE, e);
         }
-        return source;
     }
 
     /** Configures a {@link SpiffeJwtSvidSource}. */
@@ -197,7 +254,8 @@ public final class SpiffeJwtSvidSource implements IdentityTokenSource, AutoClose
         /**
          * How long the first connection waits for the Workload API. Defaults to 10 seconds.
          *
-         * @param initTimeout a positive duration
+         * @param initTimeout a positive duration; the Workload API client waits in whole seconds, so
+         *     a fraction rounds up
          * @return this builder
          */
         public Builder initTimeout(Duration initTimeout) {

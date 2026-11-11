@@ -7,7 +7,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * What a delegated call returned: the JSON-RPC result as received, and the target's card.
+ * What a delegated call returned: the JSON-RPC result, and the target's card.
+ *
+ * <p>The result is in the A2A 1.0 shape, with the payload under {@code message} or {@code task}.
+ * A 0.3 agent returns the message or task itself, tagged with {@code kind}; the client wraps it
+ * under that kind, so {@link #message()}, {@link #task()} and {@link #text()} work for both.
  *
  * @param result the JSON-RPC result, carrying a {@code message} or a {@code task}
  * @param agentCard the target's card

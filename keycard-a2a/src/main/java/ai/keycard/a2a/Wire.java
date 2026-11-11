@@ -57,6 +57,23 @@ record Wire(String version, String header, String method) {
      * The JSON-RPC URL the card advertises: the JSONRPC interface matching this generation, else
      * the first JSONRPC interface, else a 0.3 card's top-level {@code url}.
      */
+    /**
+     * Puts a result in the 1.0 shape. A 1.0 result wraps its payload ({@code {"message": {...}}} or
+     * {@code {"task": {...}}}); a 0.3 result is the message or task itself, tagged with {@code
+     * kind}, so it is wrapped under that kind.
+     */
+    Map<String, Object> decodeResult(Map<String, Object> result) {
+        if (legacy()
+                && result.get("kind") instanceof String kind
+                && (kind.equals("message") || kind.equals("task"))
+                && !result.containsKey(kind)) {
+            Map<String, Object> wrapped = new LinkedHashMap<>();
+            wrapped.put(kind, result);
+            return wrapped;
+        }
+        return result;
+    }
+
     @Nullable
     String endpointFrom(AgentCard card) {
         List<Map<?, ?>> interfaces = new ArrayList<>();

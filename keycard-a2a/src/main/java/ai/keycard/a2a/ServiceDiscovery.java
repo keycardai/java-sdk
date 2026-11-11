@@ -116,8 +116,11 @@ public final class ServiceDiscovery {
         Map<String, Object> document;
         try {
             document = JSONObjectUtils.parse(response.body());
-        } catch (ParseException e) {
+        } catch (ParseException | RuntimeException e) {
             throw new A2aDiscoveryException("agent card from " + url + " is not a JSON object", e, false);
+        }
+        if (document == null) {
+            throw new A2aDiscoveryException("agent card from " + url + " is not a JSON object", null, false);
         }
         if (!(document.get("name") instanceof String name) || name.isEmpty()) {
             throw new A2aDiscoveryException("agent card from " + url + " is missing the required name", null, false);
