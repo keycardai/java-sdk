@@ -14,7 +14,7 @@ implementation("ai.keycard:keycard-mcp:0.1.0")
 URI zone = URI.create("https://acme.keycard.cloud");
 AuthProvider keycard = AuthProvider.builder(zone)
         .credential(ClientSecret.of(clientId, clientSecret))
-        .audiences("https://mcp.example.com/mcp")
+        .audiences("https://mcp.example.com")
         .build();
 
 context.addServlet(new ServletHolder(ProtectedResourceMetadataServlet.builder(zone).build()),
@@ -31,6 +31,10 @@ A filter covers only the requests its mapping matches, so map it to every path t
 protected servlet; `/mcp/*` covers `/mcp` and everything under it. With `FORWARD` and `INCLUDE`
 in the mapping, a request another servlet forwards to `/mcp` is checked too. Both filters
 recognize a request they already handled, so a forward doesn't verify or exchange twice.
+
+The audience is the server's origin, matching the resource Keycard knows it by. A 401 points
+the client at `/.well-known/oauth-protected-resource`, whose `resource` is the origin, so that is
+what the client asks Keycard for.
 
 In a handler, `KeycardRequest.accessToken(request)` is the verified caller and
 `KeycardRequest.accessContext(request)` holds a token, or an error, per granted resource.

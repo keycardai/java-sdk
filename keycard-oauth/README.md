@@ -35,7 +35,7 @@ The issued token's `sub` is still the user, and the zone records your applicatio
 
 ```java
 TokenVerifier verifier = TokenVerifier.builder(zone)
-        .audiences("https://mcp.example.com/mcp")
+        .audiences("https://mcp.example.com")
         .build();
 AccessToken caller = verifier.verifyToken(bearerToken);   // throws InvalidTokenException
 ```
