@@ -40,6 +40,8 @@ public final class DeviceAuthorizationClient {
 
     private static final Duration SLOW_DOWN_INCREMENT = Duration.ofSeconds(5);
 
+    private static final long MAX_SECONDS = Duration.ofDays(365).toSeconds();
+
     /** Waits between polls. The default sleeps the calling thread. */
     @FunctionalInterface
     public interface Sleeper {
@@ -348,7 +350,11 @@ public final class DeviceAuthorizationClient {
         if (value == null && fallback != null) {
             return fallback;
         }
-        if ((value instanceof Long || value instanceof Integer) && ((Number) value).longValue() > 0) {
+        // A year bounds the codes' lifetime and the poll interval: anything longer is a malformed
+        // response, and keeping it bounded keeps expiresAt arithmetic from overflowing.
+        if ((value instanceof Long || value instanceof Integer)
+                && ((Number) value).longValue() > 0
+                && ((Number) value).longValue() <= MAX_SECONDS) {
             return Duration.ofSeconds(((Number) value).longValue());
         }
         throw invalid("the device authorization response has " + (value == null ? "no " : "an invalid ") + field);

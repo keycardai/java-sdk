@@ -29,9 +29,18 @@ public final class JwtSigner {
     private JwtSigner(SigningKey key) {
         this.key = key;
         if (key.privateKey() instanceof RSAPrivateKey rsa) {
+            if (rsa.getModulus().bitLength() < 2048) {
+                throw new ConfigurationException("RSA signing keys must be at least 2048 bits, got "
+                        + rsa.getModulus().bitLength());
+            }
             this.algorithm = JWSAlgorithm.RS256;
             this.signer = new RSASSASigner(rsa);
         } else if (key.privateKey() instanceof ECPrivateKey ec) {
+            // ES256 is P-256 only; another curve would fail at sign time instead of here.
+            if (ec.getParams().getCurve().getField().getFieldSize() != 256) {
+                throw new ConfigurationException("EC signing keys must be on P-256 for ES256, got a "
+                        + ec.getParams().getCurve().getField().getFieldSize() + "-bit curve");
+            }
             this.algorithm = JWSAlgorithm.ES256;
             try {
                 this.signer = new ECDSASigner(ec);
@@ -49,7 +58,8 @@ public final class JwtSigner {
      *
      * @param key the signing key, its id and an optional default issuer
      * @return the signer
-     * @throws ConfigurationException when the key is neither RSA nor EC P-256
+     * @throws ConfigurationException when the key is neither RSA of at least 2048 bits nor EC
+     *     P-256
      */
     public static JwtSigner of(SigningKey key) {
         return new JwtSigner(Objects.requireNonNull(key, "key"));

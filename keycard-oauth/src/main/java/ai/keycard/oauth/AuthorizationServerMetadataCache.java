@@ -44,7 +44,13 @@ public final class AuthorizationServerMetadataCache {
         this.discovery = builder.discovery;
         this.clock = builder.clock;
         this.discoveryTtl = builder.discoveryTtl;
-        this.negativeTtl = builder.negativeTtl;
+        // The default failure TTL shrinks to fit a short discovery TTL, so setting only
+        // discoveryTtl (as TokenVerifier and the clients do) never fails; an explicit longer
+        // negativeTtl is still a configuration error.
+        this.negativeTtl =
+                builder.negativeTtl.equals(DEFAULT_NEGATIVE_TTL) && builder.negativeTtl.compareTo(discoveryTtl) > 0
+                        ? discoveryTtl
+                        : builder.negativeTtl;
         if (negativeTtl.compareTo(discoveryTtl) > 0) {
             throw new ConfigurationException(
                     "negativeTtl (" + negativeTtl + ") must not exceed discoveryTtl (" + discoveryTtl + ")");
@@ -104,7 +110,8 @@ public final class AuthorizationServerMetadataCache {
     }
 
     /**
-     * An endpoint from cached metadata, recording its absence as a deterministic failure.
+     * An endpoint from cached metadata. Its absence fails this lookup and shortens the cached
+     * metadata's life to {@code negativeTtl}; lookups of other fields keep working meanwhile.
      *
      * @param field the metadata field name, for the error message
      * @param accessor reads the endpoint from the metadata
@@ -118,15 +125,22 @@ public final class AuthorizationServerMetadataCache {
         if (endpoint != null) {
             return endpoint;
         }
-        OAuthProtocolException missing = new OAuthProtocolException(
-                "metadata for " + issuer + " has no " + field, OAuthProtocolException.INVALID_METADATA);
+        // The metadata stays cached for lookups of other fields (the keyring needs jwks_uri, a
+        // token client token_endpoint), but expires within negative_ttl so a corrected document
+        // is picked up as base.md requires.
         String key = key(issuer);
+        Instant limit = clock.instant().plus(negativeTtl);
         if (negativeTtl.isZero()) {
             entries.remove(key);
         } else {
-            entries.put(key, new Entry(null, missing, clock.instant().plus(negativeTtl)));
+            entries.computeIfPresent(
+                    key,
+                    (k, entry) -> entry.metadata() != null && entry.expiresAt().isAfter(limit)
+                            ? new Entry(entry.metadata(), null, limit)
+                            : entry);
         }
-        throw missing;
+        throw new OAuthProtocolException(
+                "metadata for " + issuer + " has no " + field, OAuthProtocolException.INVALID_METADATA);
     }
 
     /**

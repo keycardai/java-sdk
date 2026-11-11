@@ -129,7 +129,9 @@ public record AccessToken(String token, Map<String, Object> claims) {
      * @return the {@code exp} claim
      */
     public Instant expiresAt() {
-        return Instant.ofEpochSecond(((Number) claims.get("exp")).longValue());
+        long exp = ((Number) claims.get("exp")).longValue();
+        // Instant.ofEpochSecond throws past year 1,000,000,000; a token that far out never expires.
+        return exp >= Instant.MAX.getEpochSecond() ? Instant.MAX : Instant.ofEpochSecond(exp);
     }
 
     /**

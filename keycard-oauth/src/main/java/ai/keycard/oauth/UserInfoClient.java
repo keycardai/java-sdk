@@ -106,6 +106,9 @@ public final class UserInfoClient {
         } catch (ParseException e) {
             throw new OAuthProtocolException("the UserInfo response is not a JSON object", "invalid_response", e);
         }
+        if (claims == null) {
+            throw new OAuthProtocolException("the UserInfo response is not a JSON object", "invalid_response");
+        }
         if (!(claims.get("sub") instanceof String sub) || sub.isEmpty()) {
             throw new OAuthProtocolException("the UserInfo response has no sub", "invalid_response");
         }

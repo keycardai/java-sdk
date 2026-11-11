@@ -133,6 +133,10 @@ public final class AuthorizationServerDiscovery {
                     "metadata for " + issuer + " is not a JSON object", OAuthProtocolException.INVALID_METADATA, e);
         }
 
+        if (document == null) {
+            throw new OAuthProtocolException(
+                    "metadata for " + issuer + " is not a JSON object", OAuthProtocolException.INVALID_METADATA);
+        }
         Object documentIssuer = document.get("issuer");
         if (!(documentIssuer instanceof String issuerString) || issuerString.isEmpty()) {
             throw new OAuthProtocolException(

@@ -102,13 +102,24 @@ public final class ClientRegistrationClient {
             throw invalid("the registration response has no client_id");
         }
         Object managementUri = document.get("registration_client_uri");
+        URI management = null;
+        if (managementUri instanceof String uri && !uri.isEmpty()) {
+            try {
+                management = URI.create(uri);
+            } catch (IllegalArgumentException e) {
+                throw new OAuthProtocolException(
+                        "the registration response has an invalid registration_client_uri",
+                        OAuthProtocolException.INVALID_RESPONSE,
+                        e);
+            }
+        }
         return new RegisteredClient(
                 clientId,
                 string(document, "client_secret"),
                 instant(document, "client_id_issued_at"),
                 instant(document, "client_secret_expires_at"),
                 string(document, "registration_access_token"),
-                managementUri instanceof String uri && !uri.isEmpty() ? URI.create(uri) : null,
+                management,
                 document);
     }
 

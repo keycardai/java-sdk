@@ -240,7 +240,10 @@ class JwksCachingConformanceTest {
             first.interrupt();
             first.join(5000);
 
-            assertThat(cancelled.get()).isInstanceOf(NetworkException.class);
+            assertThat(cancelled.get())
+                    .isInstanceOf(JwksException.Fetch.class)
+                    .cause()
+                    .isInstanceOf(NetworkException.class);
             assertThat(second.get(5, TimeUnit.SECONDS)).isNotNull();
         } finally {
             pool.shutdownNow();

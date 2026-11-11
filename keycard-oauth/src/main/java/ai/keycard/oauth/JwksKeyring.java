@@ -67,6 +67,8 @@ public final class JwksKeyring implements VerificationKeyring {
         }
     };
     private final SingleFlight<URI, KeySet> fetches = new SingleFlight<>();
+    /** Bumped by invalidate and clear, so a fetch that started before them doesn't store its result. */
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
 
     private JwksKeyring(Builder builder) {
         this.transport = builder.transport;
@@ -132,7 +134,13 @@ public final class JwksKeyring implements VerificationKeyring {
         boolean fresh = set != null && now.isBefore(set.fetchedAt().plus(keyTtl));
         if (!fresh || (set.find(kid) == null && cooldownPassed(set, now))) {
             KeySet stale = set;
-            set = fetches.run(jwksUri, () -> fetchUnlessNewer(jwksUri, stale), "the JWKS at " + jwksUri);
+            try {
+                set = fetches.run(jwksUri, () -> fetchUnlessNewer(jwksUri, stale), "the JWKS at " + jwksUri);
+            } catch (NetworkException e) {
+                // Only an interruption reaches here as a NetworkException; keep the flag set and
+                // report it as the key-fetch failure the verifier's contract names.
+                throw new JwksException.Fetch("fetching the JWKS at " + jwksUri + " was interrupted", e, true);
+            }
         }
 
         JWK jwk = set.find(kid);
@@ -153,6 +161,7 @@ public final class JwksKeyring implements VerificationKeyring {
      * @param issuer the issuer to forget
      */
     public void invalidate(URI issuer) {
+        generation.incrementAndGet();
         URI jwksUri = jwksUriByIssuer.remove(key(issuer));
         metadata.invalidate(issuer);
         if (jwksUri != null) {
@@ -167,6 +176,7 @@ public final class JwksKeyring implements VerificationKeyring {
 
     /** Drops every cached key set, key and discovery result. */
     public void clear() {
+        generation.incrementAndGet();
         jwksUriByIssuer.clear();
         keySets.clear();
         fetches.forgetAll();
@@ -200,12 +210,15 @@ public final class JwksKeyring implements VerificationKeyring {
      * lead, in which case that one is reused.
      */
     private KeySet fetchUnlessNewer(URI jwksUri, @Nullable KeySet stale) {
+        long started = generation.get();
         KeySet current = keySets.get(jwksUri);
         if (current != null && current != stale) {
             return current;
         }
         KeySet fetched = fetch(jwksUri);
-        keySets.put(jwksUri, fetched);
+        if (generation.get() == started) {
+            keySets.put(jwksUri, fetched);
+        }
         return fetched;
     }
 
@@ -228,11 +241,42 @@ public final class JwksKeyring implements VerificationKeyring {
             throw new JwksException.Fetch(
                     "the JWKS at " + jwksUri + " returned HTTP " + response.status(), status, status.retryable());
         }
+        return new KeySet(parseKeySet(jwksUri, response.body()), clock.instant());
+    }
+
+    /**
+     * Parses the key set entry by entry, skipping keys that are malformed or unusable (RFC 7517
+     * §5), so one bad entry doesn't stop every token from verifying.
+     */
+    static JWKSet parseKeySet(URI jwksUri, String body) {
+        Map<String, Object> document;
         try {
-            return new KeySet(JWKSet.parse(response.body()), clock.instant());
+            document = com.nimbusds.jose.util.JSONObjectUtils.parse(body);
         } catch (ParseException e) {
             throw new JwksException.Fetch("the JWKS at " + jwksUri + " is not a key set", e, false);
         }
+        if (document == null || !(document.get("keys") instanceof java.util.List<?> entries)) {
+            throw new JwksException.Fetch("the JWKS at " + jwksUri + " is not a key set", null, false);
+        }
+        java.util.List<JWK> usable = new java.util.ArrayList<>();
+        for (Object entry : entries) {
+            if (!(entry instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            try {
+                @SuppressWarnings("unchecked")
+                JWK jwk = JWK.parse((Map<String, Object>) raw);
+                if (jwk instanceof RSAKey rsa) {
+                    rsa.toRSAPublicKey();
+                } else if (jwk instanceof ECKey ec) {
+                    ec.toECPublicKey();
+                }
+                usable.add(jwk);
+            } catch (ParseException | JOSEException | RuntimeException e) {
+                // Skipped: RFC 7517 §5 says to ignore keys with missing or invalid members.
+            }
+        }
+        return new JWKSet(usable);
     }
 
     private static PublicKey toPublicKey(JWK jwk, String kid) {
@@ -272,13 +316,15 @@ public final class JwksKeyring implements VerificationKeyring {
 
     private record KeySet(JWKSet set, Instant fetchedAt) {
 
+        /** The first key with this kid usable for signatures; another key sharing the kid doesn't hide it. */
         @Nullable
         JWK find(String kid) {
-            JWK jwk = set.getKeyByKeyId(kid);
-            if (jwk == null || (jwk.getKeyUse() != null && jwk.getKeyUse() != KeyUse.SIGNATURE)) {
-                return null;
+            for (JWK jwk : set.getKeys()) {
+                if (kid.equals(jwk.getKeyID()) && (jwk.getKeyUse() == null || jwk.getKeyUse() == KeyUse.SIGNATURE)) {
+                    return jwk;
+                }
             }
-            return jwk;
+            return null;
         }
     }
 

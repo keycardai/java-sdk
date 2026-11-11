@@ -146,6 +146,14 @@ public final class JwtVerifier {
             key = keyring.resolve(URI.create(issuer), keyId);
         } catch (JwksException.KeyNotFound e) {
             throw new InvalidTokenException("no key " + keyId + " for issuer " + issuer, e);
+        } catch (KeycardException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new JwksException.Fetch(
+                    "the keyring failed to resolve key " + keyId + " for issuer " + issuer, e, false);
+        }
+        if (key == null) {
+            throw new InvalidTokenException("no key " + keyId + " for issuer " + issuer);
         }
 
         try {
@@ -195,9 +203,10 @@ public final class JwtVerifier {
             values.add(single);
         } else if (aud instanceof Collection<?> many) {
             for (Object value : many) {
-                if (value instanceof String string) {
-                    values.add(string);
+                if (!(value instanceof String string)) {
+                    throw new InvalidTokenException("token aud holds a value that is not a string");
                 }
+                values.add(string);
             }
         }
         values.removeIf(String::isEmpty);
@@ -232,7 +241,7 @@ public final class JwtVerifier {
          * @return this builder
          */
         public Builder audiences(String... audiences) {
-            this.audiences = Set.of(audiences);
+            this.audiences = Set.copyOf(new LinkedHashSet<>(List.of(audiences)));
             return this;
         }
 
@@ -244,7 +253,7 @@ public final class JwtVerifier {
          * @throws ConfigurationException for an algorithm this verifier doesn't implement
          */
         public Builder algorithms(String... algorithms) {
-            Set<String> values = Set.of(algorithms);
+            Set<String> values = Set.copyOf(new LinkedHashSet<>(List.of(algorithms)));
             if (values.isEmpty()) {
                 throw new ConfigurationException("at least one algorithm is required");
             }
