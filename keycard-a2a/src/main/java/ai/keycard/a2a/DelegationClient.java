@@ -319,13 +319,6 @@ public final class DelegationClient {
         }
 
         /**
-         * Builds the client.
-         *
-         * @return the client
-         * @throws ai.keycard.oauth.ConfigurationException when the credential is missing or the
-         *     protocol version is unknown
-         */
-        /**
          * Origins, other than each target's own, that a card may name as its JSON-RPC endpoint,
          * such as a gateway in front of several agents. The token exchanged for a target is sent
          * there, so list only origins you trust with every target's token.
@@ -345,6 +338,13 @@ public final class DelegationClient {
             return this;
         }
 
+        /**
+         * Builds the client.
+         *
+         * @return the client
+         * @throws ai.keycard.oauth.ConfigurationException when the credential is missing or the
+         *     protocol version is unknown
+         */
         public DelegationClient build() {
             if (credential == null) {
                 throw new ai.keycard.oauth.ConfigurationException("a delegation client needs the agent's credential");
