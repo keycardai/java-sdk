@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /** Writes RFC 6750 challenges and the 503 outage response. */
@@ -11,19 +13,31 @@ final class BearerChallenge {
 
     static final String PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
+    /** A host name, IPv4 address or bracketed IPv6 address, with an optional port. */
+    private static final Pattern HOST = Pattern.compile("(?:[A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]{1,5})?");
+
     private BearerChallenge() {}
 
-    /** {@code <origin>/.well-known/oauth-protected-resource}, scheme from X-Forwarded-Proto. */
+    /**
+     * {@code <origin><context path>/.well-known/oauth-protected-resource}: the metadata servlet is
+     * mapped inside the application, so its URL carries the context path.
+     */
     static String resourceMetadataUrl(HttpServletRequest request) {
-        return origin(request) + PROTECTED_RESOURCE_PATH;
+        return origin(request) + request.getContextPath() + PROTECTED_RESOURCE_PATH;
     }
 
+    /**
+     * The origin a client used. The scheme comes from {@code X-Forwarded-Proto} only when it says
+     * {@code http} or {@code https}, and the host from {@code Host} only when it is a plain host
+     * and port, so neither header can put arbitrary text into a challenge or a metadata document.
+     */
     static String origin(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-Proto");
-        String scheme =
-                forwarded != null && !forwarded.isBlank() ? forwarded.split(",")[0].trim() : request.getScheme();
+        String candidate =
+                forwarded == null ? "" : forwarded.split(",")[0].trim().toLowerCase(Locale.ROOT);
+        String scheme = candidate.equals("http") || candidate.equals("https") ? candidate : request.getScheme();
         String host = request.getHeader("Host");
-        if (host == null || host.isBlank()) {
+        if (host == null || !HOST.matcher(host).matches()) {
             int port = request.getServerPort();
             boolean defaultPort = (scheme.equals("https") && port == 443) || (scheme.equals("http") && port == 80);
             host = request.getServerName() + (defaultPort ? "" : ":" + port);

@@ -15,3 +15,21 @@ dependencies {
     testImplementation(testFixtures(project(":keycard-oauth")))
     testImplementation(libs.jetty.ee10.servlet)
 }
+
+// Gradle publishes compileOnlyApi dependencies at compile scope, which would make Maven bundle
+// the Servlet API into an application's WAR. The container supplies it, so the POM says
+// `provided`: Maven users still see which Servlet version is needed, without getting a copy.
+mavenPublishing {
+    pom {
+        withXml {
+            val dependencies = asElement().getElementsByTagName("dependency")
+            for (i in 0 until dependencies.length) {
+                val dependency = dependencies.item(i) as org.w3c.dom.Element
+                val artifactId = dependency.getElementsByTagName("artifactId").item(0)?.textContent
+                if (artifactId == "jakarta.servlet-api") {
+                    dependency.getElementsByTagName("scope").item(0)?.textContent = "provided"
+                }
+            }
+        }
+    }
+}

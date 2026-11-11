@@ -1,6 +1,7 @@
 package ai.keycard.mcp;
 
 import ai.keycard.oauth.AccessToken;
+import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.InvalidTokenException;
 import ai.keycard.oauth.JwksException;
 import ai.keycard.oauth.KeycardException;
@@ -89,6 +90,17 @@ public final class RequireBearerAuthFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) req;
         HttpServletResponse response = (HttpServletResponse) res;
 
+        // A forward or include of a request this filter already verified: the token stands, and
+        // only this instance's scopes are left to check. Request attributes are server-side, so a
+        // client can't set this one.
+        AccessToken verified = KeycardRequest.accessToken(request).orElse(null);
+        if (verified != null) {
+            if (hasRequiredScopes(request, response, verified)) {
+                chain.doFilter(request, response);
+            }
+            return;
+        }
+
         String header = request.getHeader("Authorization");
         if (header == null || header.isBlank()) {
             BearerChallenge.challenge(request, response, 401, null, null);
@@ -108,7 +120,10 @@ public final class RequireBearerAuthFilter implements Filter {
         try {
             token = verify(request, parts[1]);
         } catch (InvalidTokenException e) {
-            BearerChallenge.challenge(request, response, 401, "invalid_token", e.getMessage());
+            // A fixed description: the verifier's message names the expected issuer and audiences,
+            // which a caller probing with forged tokens has no business learning.
+            BearerChallenge.challenge(
+                    request, response, 401, "invalid_token", "the access token is invalid or expired");
             return;
         } catch (JwksException e) {
             BearerChallenge.unavailable(response);
@@ -119,16 +134,25 @@ public final class RequireBearerAuthFilter implements Filter {
             return;
         }
 
+        if (!hasRequiredScopes(request, response, token)) {
+            return;
+        }
+        request.setAttribute(KeycardRequest.ACCESS_TOKEN_ATTRIBUTE, token);
+        chain.doFilter(request, response);
+    }
+
+    /** Answers 403 {@code insufficient_scope} and returns false when a required scope is missing. */
+    private boolean hasRequiredScopes(HttpServletRequest request, HttpServletResponse response, AccessToken token)
+            throws IOException {
         List<String> granted = token.scopes();
         for (String scope : requiredScopes) {
             if (!granted.contains(scope)) {
                 BearerChallenge.challenge(
                         request, response, 403, "insufficient_scope", "the token lacks the scope " + scope);
-                return;
+                return false;
             }
         }
-        request.setAttribute(KeycardRequest.ACCESS_TOKEN_ATTRIBUTE, token);
-        chain.doFilter(request, response);
+        return true;
     }
 
     private AccessToken verify(HttpServletRequest request, String token) {
@@ -180,8 +204,16 @@ public final class RequireBearerAuthFilter implements Filter {
          * Builds the filter.
          *
          * @return the filter
+         * @throws ConfigurationException when the verifier trusts more than one zone and no zone
+         *     resolver is set: each request must be verified against its own zone, never any
+         *     trusted one
          */
         public RequireBearerAuthFilter build() {
+            if (zoneResolver == null && verifier.issuers().size() > 1) {
+                throw new ConfigurationException(
+                        "the verifier trusts " + verifier.issuers().size()
+                                + " zones; set a zoneResolver so each request is verified against its own zone");
+            }
             return new RequireBearerAuthFilter(this);
         }
     }

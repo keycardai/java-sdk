@@ -21,10 +21,16 @@ context.addServlet(new ServletHolder(ProtectedResourceMetadataServlet.builder(zo
         "/.well-known/oauth-protected-resource/*");
 context.addServlet(new ServletHolder(AuthorizationServerMetadataServlet.of(zone)),
         "/.well-known/oauth-authorization-server");
-EnumSet<DispatcherType> request = EnumSet.of(DispatcherType.REQUEST);
-context.addFilter(new FilterHolder(RequireBearerAuthFilter.builder(keycard.tokenVerifier()).build()), "/mcp", request);
-context.addFilter(new FilterHolder(keycard.grant("https://api.example.com")), "/mcp", request);
+// Map the filters to the same pattern as the servlet they guard, for forwards and includes too.
+EnumSet<DispatcherType> dispatches = EnumSet.of(DispatcherType.REQUEST, DispatcherType.FORWARD, DispatcherType.INCLUDE);
+context.addFilter(new FilterHolder(RequireBearerAuthFilter.builder(keycard.tokenVerifier()).build()), "/mcp/*", dispatches);
+context.addFilter(new FilterHolder(keycard.grant("https://api.example.com")), "/mcp/*", dispatches);
 ```
+
+A filter covers only the requests its mapping matches, so map it to every path that reaches the
+protected servlet; `/mcp/*` covers `/mcp` and everything under it. With `FORWARD` and `INCLUDE`
+in the mapping, a request another servlet forwards to `/mcp` is checked too. Both filters
+recognize a request they already handled, so a forward doesn't verify or exchange twice.
 
 In a handler, `KeycardRequest.accessToken(request)` is the verified caller and
 `KeycardRequest.accessContext(request)` holds a token, or an error, per granted resource.

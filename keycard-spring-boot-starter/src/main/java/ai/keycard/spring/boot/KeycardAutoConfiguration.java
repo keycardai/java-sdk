@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
@@ -105,6 +106,7 @@ public class KeycardAutoConfiguration {
 
     /**
      * The default chain when the application defines none: every request needs a verified token.
+     * It accepts nothing but bearer tokens, so it keeps no session and has no CSRF to protect.
      *
      * @param http Spring's builder
      * @param keycard the configurer
@@ -116,6 +118,8 @@ public class KeycardAutoConfiguration {
     public SecurityFilterChain keycardSecurityFilterChain(HttpSecurity http, KeycardResourceServer keycard)
             throws Exception {
         return http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .with(keycard, Customizer.withDefaults())
                 .build();
     }

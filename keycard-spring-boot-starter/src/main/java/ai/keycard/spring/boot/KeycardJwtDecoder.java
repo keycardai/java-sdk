@@ -44,7 +44,10 @@ public final class KeycardJwtDecoder implements JwtDecoder {
         try {
             verified = verifier.verifyToken(token);
         } catch (InvalidTokenException e) {
-            throw new BadJwtException(e.getMessage(), e);
+            // Spring puts this message in the challenge's error_description, so keep it fixed: the
+            // verifier's own message names the expected issuer and audiences. The cause keeps it
+            // for the application's logs.
+            throw new BadJwtException("the access token is invalid or expired", e);
         } catch (KeycardException e) {
             throw new ZoneUnavailableException("the zone could not be reached to verify the token", e);
         }

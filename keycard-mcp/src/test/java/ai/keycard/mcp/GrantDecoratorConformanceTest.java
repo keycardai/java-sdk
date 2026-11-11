@@ -245,11 +245,13 @@ class GrantDecoratorConformanceTest {
     }
 
     private static TestServer serve(StubZone zone, AuthProvider provider, Probe probe, GrantFilter grant) {
+        RequireBearerAuthFilter.Builder bearer = RequireBearerAuthFilter.builder(provider.tokenVerifier());
+        if (provider.issuers().size() > 1) {
+            // A multi-zone verifier needs each request pinned to a zone; this server serves one.
+            bearer.zoneResolver(request -> zone.issuer());
+        }
         return new TestServer()
-                .filter(
-                        "/*",
-                        RequireBearerAuthFilter.builder(provider.tokenVerifier())
-                                .build())
+                .filter("/*", bearer.build())
                 .filter("/tools/*", grant)
                 .servlet("/tools/*", probe)
                 .start();

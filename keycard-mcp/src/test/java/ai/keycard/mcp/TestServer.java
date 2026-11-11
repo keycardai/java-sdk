@@ -58,6 +58,16 @@ final class TestServer implements AutoCloseable {
         return this;
     }
 
+    TestServer filter(String path, Filter filter, DispatcherType first, DispatcherType... rest) {
+        context.addFilter(new FilterHolder(filter), path, EnumSet.of(first, rest));
+        return this;
+    }
+
+    TestServer contextPath(String contextPath) {
+        context.setContextPath(contextPath);
+        return this;
+    }
+
     TestServer start() {
         try {
             server.start();

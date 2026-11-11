@@ -72,7 +72,7 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
-    @DisplayName("P8: an unauthenticated POST is 401, not a CSRF 403; a cookie POST keeps CSRF")
+    @DisplayName("P8: the default chain answers an unauthenticated POST, cookie or not, with the 401 challenge")
     void postWithoutToken() throws Exception {
         withApp(DefaultChain.class, (zone, mvc) -> {
             MvcResult bare = mvc.perform(post("/echo")).andReturn();
@@ -84,7 +84,19 @@ class KeycardStarterConformanceTest {
             assertThat(authorized.getResponse().getStatus()).isEqualTo(200);
             MvcResult cookie = mvc.perform(post("/echo").cookie(new jakarta.servlet.http.Cookie("SESSION", "x")))
                     .andReturn();
-            assertThat(cookie.getResponse().getStatus()).isEqualTo(403);
+            assertThat(cookie.getResponse().getStatus()).isEqualTo(401);
+            assertThat(cookie.getResponse().getHeader("Set-Cookie")).isNull();
+        });
+    }
+
+    @Test
+    @DisplayName("the configurer leaves an application chain's CSRF on: a POST without a CSRF token is 403")
+    void applicationChainKeepsCsrf() throws Exception {
+        withApp(ScopedChain.class, (zone, mvc) -> {
+            MvcResult basic = mvc.perform(post("/echo").header("Authorization", "Basic dTpw"))
+                    .andReturn();
+            assertThat(basic.getResponse().getStatus()).isEqualTo(403);
+            assertThat(basic.getResponse().getHeader("WWW-Authenticate")).doesNotContain("invalid_token");
         });
     }
 

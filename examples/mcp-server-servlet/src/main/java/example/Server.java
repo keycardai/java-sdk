@@ -232,7 +232,11 @@ public final class Server implements AutoCloseable {
     private static void addFilter(ServletContextHandler context, Filter filter) {
         FilterHolder holder = new FilterHolder(filter);
         holder.setAsyncSupported(true);
-        context.addFilter(holder, MCP_PATH, EnumSet.of(DispatcherType.REQUEST));
+        // The servlet's own path plus everything under it, for forwards and includes as well.
+        context.addFilter(
+                holder,
+                MCP_PATH + "/*",
+                EnumSet.of(DispatcherType.REQUEST, DispatcherType.FORWARD, DispatcherType.INCLUDE));
     }
 
     private static String require(String name) {

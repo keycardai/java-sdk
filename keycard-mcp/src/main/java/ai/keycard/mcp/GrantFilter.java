@@ -11,6 +11,7 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -133,8 +134,15 @@ public final class GrantFilter implements Filter {
         }
 
         AccessContext context = KeycardRequest.accessContext(request).orElseGet(AccessContext::new);
-        String user = userIdentifier == null ? null : userIdentifier.resolve(request);
-        provider.exchange(context, caller.issuer(), caller.token(), resources, user, scopes);
+        // On a forward or include the context already holds this grant's results; exchange only
+        // what's new rather than spend a second exchange per resource.
+        List<String> pending = new ArrayList<>(resources);
+        pending.removeAll(context.successfulResources());
+        pending.removeAll(context.failedResources());
+        if (!pending.isEmpty()) {
+            String user = userIdentifier == null ? null : userIdentifier.resolve(request);
+            provider.exchange(context, caller.issuer(), caller.token(), pending, user, scopes);
+        }
         request.setAttribute(KeycardRequest.ACCESS_CONTEXT_ATTRIBUTE, context);
         chain.doFilter(request, response);
     }

@@ -5,12 +5,10 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
-import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
@@ -33,10 +31,18 @@ import org.springframework.security.web.authentication.AuthenticationFailureHand
  *             .authorizeHttpRequests(auth -> auth
  *                     .requestMatchers("/admin/**").hasAuthority("SCOPE_admin")
  *                     .anyRequest().authenticated())
+ *             .csrf(csrf -> csrf.disable())
+ *             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
  *             .with(keycard, Customizer.withDefaults())
  *             .build();
  * }
  * }</pre>
+ *
+ * <p>The configurer leaves CSRF as the chain sets it. A chain that only accepts bearer tokens
+ * should disable CSRF and sessions, as above and as the starter's default chain does: a bearer
+ * token is never sent by the browser on its own, so there is nothing to forge, and with CSRF on,
+ * an unauthenticated POST gets a CSRF 403 instead of the 401 challenge an MCP client needs. A
+ * chain that also signs people in with cookies, Basic or a login form must keep CSRF on.
  *
  * <p>Protected-resource metadata is written by Spring Security's filter, which needs a JSON
  * library on the classpath (Jackson, which Spring Boot's web starter brings, Gson or JSON-B).
@@ -94,21 +100,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                     scopesSupported.forEach(builder::scope);
                 })));
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
-        // CSRF rides on cookies a browser attaches by itself, so a request with no Cookie header
-        // can't be one; skipping it there lets an unauthenticated POST get its 401 challenge
-        // instead of a CSRF 403. Cookie requests keep full protection, and a chain that disabled
-        // CSRF stays disabled.
-        CsrfConfigurer<HttpSecurity> csrf = csrfConfigurer(http);
-        if (csrf != null) {
-            csrf.ignoringRequestMatchers(request -> request.getHeader(HttpHeaders.COOKIE) == null);
-        }
         http.addFilterBefore(authorizationServerMetadata, BearerTokenAuthenticationFilter.class);
-    }
-
-    /** Spring keys configurers by raw class, so the lookup can't be typed. */
-    @SuppressWarnings("unchecked")
-    private static CsrfConfigurer<HttpSecurity> csrfConfigurer(HttpSecurity http) {
-        return http.getConfigurer(CsrfConfigurer.class);
     }
 
     /** Answers zone failures with 503 and no challenge; everything else gets the RFC 6750 challenge. */
