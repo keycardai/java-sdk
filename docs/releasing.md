@@ -17,14 +17,16 @@ Every module releases together under one version, `v<version>`, to Maven Central
 
 ## Commit types
 
-Releasable types are `feat`, `fix`, `refactor`, `perf`, `test`, `build`, `ci` and `revert`;
-`docs`, `chore` and `style` never cut a release. The scope is free-form (`feat(spring):`,
-`fix(mcp):`, or none), because every module ships together. `feat` is a minor, `fix`,
-`refactor` and `perf` are patches, and `!` before the colon is a major. While
-`major_version_zero = true` in `.cz.toml` a major lands as a minor; flip it to `false` at 1.0.0.
+Releasable types are `feat`, `fix`, `refactor`, `perf`, `build` and `revert`; `docs`, `chore`,
+`style`, `test` and `ci` never cut a release, because they change nothing a consumer downloads.
+`build` stays releasable so a dependency bump reaches consumers. The scope is free-form
+(`feat(spring):`, `fix(mcp):`, or none), because every module ships together. `feat` is a
+minor; `fix`, `refactor`, `perf`, `build` and `revert` are patches; `!` before the colon or a
+`BREAKING CHANGE:` footer is a major. While `major_version_zero = true` in `.cz.toml` a major
+lands as a minor; flip it to `false` at 1.0.0.
 
-Squash merges are what `main` sees, so the PR title is the commit subject. CI validates PR
-commit messages with `cz check`.
+Squash merges are what `main` sees, so the PR title is the commit subject. CI checks the PR
+title and the PR's commits with `cz check`, and re-checks when the title is edited.
 
 Never hand-edit the version in `gradle.properties` or `.cz.toml`, or `CHANGELOG.md`: `cz bump`
 owns all three, and `changelog.py check-drift` fails CI when the two version lines disagree.
@@ -33,10 +35,15 @@ owns all three, and `changelog.py check-drift` fails CI when the two version lin
 
 | Setting | Value |
 | --- | --- |
-| Variable `SDK_RELEASE_APP_ID` | the Keycard SDK Release app id |
-| Secret `SDK_RELEASE_PRIVATE_KEY` | that app's private key |
-| Environment `release` | holds the five secrets below; restrict it to `v*` tags |
+| Variable `SDK_RELEASE_APP_ID` | the Keycard SDK Release app id (a repository variable) |
+| Environment `bump` | deployment branches: `main` only; holds the secret `SDK_RELEASE_PRIVATE_KEY`, the app's private key |
+| Environment `release` | deployment tags: `v*` only; holds the five secrets below; add required reviewers to approve each publish |
+| Tag ruleset on `v*` | only the release app and repository admins may create, update or delete them |
 | Allow auto-merge, squash merge | enabled |
+
+The secrets live in environments, not at the repository level, because a repository secret is
+readable by a workflow on any branch, and anyone who can push a branch can edit a workflow.
+`release.yml` also refuses a tag that doesn't point at a commit on `main`.
 
 `main.yml` skips the bump while `SDK_RELEASE_APP_ID` is unset and logs a warning, so an
 unconfigured repo is visible rather than quiet.
@@ -85,9 +92,9 @@ Then check the artifacts from a clean Gradle and a clean Maven project outside t
 
 ## Proving the pipeline without a real change
 
-Run `bump-package.yml` from the Actions tab with `increment` forced to `patch`. It opens a bump
-PR, merges it, tags it, and the tag publishes. Do this only once the first release is out;
-every run publishes a real version.
+Run `bump-package.yml` from the Actions tab, on `main`, with `increment` forced to `patch`. It
+opens a bump PR, merges it once CI passes, tags it, and the tag publishes. Every run publishes a
+real version. It refuses to run from any other branch, and before `v0.1.0` exists.
 
 ## When something goes wrong
 

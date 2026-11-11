@@ -397,10 +397,14 @@ def create_pr_with_automerge(
 def checks_green(pr_data: dict) -> bool:
     """True when every check in the PR's status rollup has finished cleanly.
 
-    An empty rollup counts as green (no required checks registered).
+    An empty rollup is not green: right after the PR opens, CI hasn't registered
+    its checks yet, and merging then would skip them.
     """
+    rollup = pr_data.get("statusCheckRollup") or []
+    if not rollup:
+        return False
     ok_conclusions = {"SUCCESS", "NEUTRAL", "SKIPPED"}
-    for check in pr_data.get("statusCheckRollup") or []:
+    for check in rollup:
         status = (check.get("status") or "").upper()
         conclusion = (check.get("conclusion") or "").upper()
         if status and status != "COMPLETED":

@@ -42,7 +42,7 @@ import org.springframework.security.web.authentication.AuthenticationFailureHand
  * should disable CSRF and sessions, as above and as the starter's default chain does: a bearer
  * token is never sent by the browser on its own, so there is nothing to forge, and with CSRF on,
  * an unauthenticated POST gets a CSRF 403 instead of the 401 challenge an MCP client needs. A
- * chain that also signs people in with cookies, Basic or a login form must keep CSRF on.
+ * chain that also signs people in with cookies, Basic or a sign-in form must keep CSRF on.
  *
  * <p>Protected-resource metadata is written by Spring Security's filter, which needs a JSON
  * library on the classpath (Jackson, which Spring Boot's web starter brings, Gson or JSON-B).

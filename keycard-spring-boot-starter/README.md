@@ -35,7 +35,7 @@ The configurer leaves CSRF as your chain sets it. Disable CSRF and sessions in a
 accepts bearer tokens, as above: the browser never attaches a bearer token by itself, so there's
 nothing to forge, and with CSRF on an unauthenticated POST gets a 403 instead of the 401 challenge
 MCP clients follow. Keep CSRF on in any chain that also signs people in with cookies, Basic or a
-login form.
+sign-in form.
 
 Declare the resources a handler calls, and take the results as a parameter:
 

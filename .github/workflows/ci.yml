@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # edited re-runs the checks when someone retitles the PR, since the title
+    # becomes main's commit subject.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -49,4 +52,13 @@ jobs:
         run: python3 scripts/changelog.py check-drift
       - name: Validate commit messages
         if: github.event_name == 'pull_request'
-        run: python3 scripts/changelog.py validate origin/${{ github.base_ref }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 scripts/changelog.py validate "origin/$BASE_REF"
+      # Squash merges make the PR title main's commit subject, so it decides the
+      # release. Passed through env: a title is attacker-controlled text.
+      - name: Validate the PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: cz check --message "$PR_TITLE"

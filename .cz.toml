@@ -13,16 +13,27 @@ major_version_zero = true
 
 [tool.commitizen.customize]
 # Any scope, or none: every module releases together, so the scope only documents
-# what changed. docs/chore/style are deliberately absent: a docs-only change must
-# not cut a release. Literal strings so the regex backslashes are not TOML-escaped.
-changelog_pattern = '^(feat|fix|refactor|perf|test|build|ci|revert)(\([^)]*\))?(!)?:'
-# commitizen picks the increment from bump_pattern, separate from changelog_pattern.
-# Keep group 1 shaped like "feat(scope)!" so bump_map below can match against it.
-bump_pattern = '^((feat|fix|refactor|perf)(\([^)]*\))?!?):'
+# what changed. docs/chore/style/test/ci are deliberately absent: they change
+# nothing a consumer downloads, so they must not cut a release. build stays in,
+# because a dependency bump is a fix consumers need. changelog_pattern and
+# bump_pattern list the same types, or a change could open a changelog entry that
+# cz bump then refuses to version. Literal strings so the backslashes are not
+# TOML-escaped.
+changelog_pattern = '^(feat|fix|refactor|perf|build|revert)(\([^)]*\))?(!)?:'
+# What cz check accepts, for PR titles and commits. Without it cz_customize accepts
+# any message at all. bump is the release app's own subject.
+schema_pattern = '^(bump|feat|fix|refactor|perf|build|revert|docs|chore|style|test|ci)(\([^)]*\))?!?: \S.*'
+# commitizen picks the increment from bump_pattern, matched against every line of
+# the message, so a "BREAKING CHANGE:" footer counts as well as "!". Keep group 1
+# shaped like "feat(scope)!" so bump_map below can match against it.
+bump_pattern = '^((BREAKING[\- ]CHANGE|feat|fix|refactor|perf|build|revert)(\([^)]*\))?!?):'
 
 [tool.commitizen.customize.bump_map]
 "^.+!$" = "MAJOR"
+'^BREAKING[\- ]CHANGE' = "MAJOR"
 "^feat" = "MINOR"
 "^fix" = "PATCH"
 "^refactor" = "PATCH"
 "^perf" = "PATCH"
+"^build" = "PATCH"
+"^revert" = "PATCH"

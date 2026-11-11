@@ -33,7 +33,14 @@ on:
 
 jobs:
   bump:
+    # The release app's key opens, merges and tags; only main may use it, so a
+    # dispatch from another branch (whose copy of this file anyone with push
+    # access could change) never runs.
+    if: github.ref == 'refs/heads/main' && inputs.target_branch == 'main'
     runs-on: ubuntu-latest
+    # The app key lives in this environment, which only main may deploy to, so a
+    # workflow edited on another branch can't read it.
+    environment: bump
     permissions:
       contents: write
       pull-requests: write
@@ -59,12 +66,26 @@ jobs:
 
       - run: pip install commitizen==4.19.2
 
+      # Before v0.1.0 exists commitizen counts every commit ever made, so a bump
+      # would skip past 0.1.0. main.yml waits for the hand-pushed tag; a manual
+      # dispatch must too.
+      - name: Check the first release is out
+        run: |
+          if [[ -z "$(git tag -l 'v*')" ]]; then
+            echo "::error::No v* release tag yet. Tag v0.1.0 by hand first (docs/releasing.md)."
+            exit 1
+          fi
+
       - name: Bump java-sdk
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          INCREMENT: ${{ inputs.increment }}
         run: |
-          ARGS=(--target-branch "${{ inputs.target_branch }}")
-          if [[ "${{ inputs.increment }}" != "auto" && -n "${{ inputs.increment }}" ]]; then
-            ARGS+=(--increment "${{ inputs.increment }}")
-          fi
+          ARGS=(--target-branch "$TARGET_BRANCH")
+          case "$INCREMENT" in
+            ""|auto) ;;
+            major|minor|patch) ARGS+=(--increment "$INCREMENT") ;;
+            *) echo "::error::increment must be auto, major, minor or patch"; exit 1 ;;
+          esac
           python3 scripts/bump_package.py java-sdk . "${ARGS[@]}"

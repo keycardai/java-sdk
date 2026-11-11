@@ -136,8 +136,10 @@ class RecoverUntaggedBumpTests(unittest.TestCase):
 
 
 class ChecksGreenTests(unittest.TestCase):
-    def test_empty_rollup_counts_as_green(self) -> None:
-        self.assertTrue(bump_package.checks_green({"statusCheckRollup": []}))
+    def test_empty_rollup_is_not_green(self) -> None:
+        # CI hasn't registered its checks yet; merging now would skip them.
+        self.assertFalse(bump_package.checks_green({"statusCheckRollup": []}))
+        self.assertFalse(bump_package.checks_green({}))
 
     def test_all_successful_checks_are_green(self) -> None:
         rollup = [
