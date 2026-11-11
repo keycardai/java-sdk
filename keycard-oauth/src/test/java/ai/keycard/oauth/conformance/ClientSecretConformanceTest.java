@@ -143,6 +143,7 @@ class ClientSecretConformanceTest {
                 BETA, ClientSecret.of("beta-client", "beta-secret")));
     }
 
+    /** The expected header value for ids and secrets made only of unreserved characters. */
     static String basic(String id, String secret) {
         return Base64.getEncoder().encodeToString((id + ":" + secret).getBytes(StandardCharsets.UTF_8));
     }

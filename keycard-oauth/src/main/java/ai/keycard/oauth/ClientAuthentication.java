@@ -46,16 +46,46 @@ public record ClientAuthentication(Map<String, String> headers, Map<String, Stri
     }
 
     /**
-     * {@code client_secret_basic}: an HTTP Basic header (RFC 7617).
+     * {@code client_secret_basic}: an HTTP Basic header (RFC 7617). Per RFC 6749 section 2.3.1
+     * the client id and secret are each percent-encoded before they are joined, so a client id
+     * such as {@code urn:app:billing} isn't split at its first colon, and a {@code %} in either
+     * isn't read as an escape. Keycard decodes them the same way.
      *
      * @param clientId the client id
      * @param clientSecret the client secret
      * @return the authentication
      */
     public static ClientAuthentication basic(String clientId, String clientSecret) {
+        String userPass = percentEncode(clientId) + ":" + percentEncode(clientSecret);
         String encoded = java.util.Base64.getEncoder()
-                .encodeToString((clientId + ":" + clientSecret).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                .encodeToString(userPass.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return header("Authorization", "Basic " + encoded);
+    }
+
+    /**
+     * Percent-encodes everything but RFC 3986's unreserved characters. Unlike form encoding, a
+     * space becomes {@code %20}, never {@code +}: Keycard decodes {@code %XX} and leaves {@code +}
+     * as it is, so a {@code +} must be sent as {@code %2B}.
+     */
+    static String percentEncode(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            char c = (char) (b & 0xff);
+            if ((c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '-'
+                    || c == '.'
+                    || c == '_'
+                    || c == '~') {
+                out.append(c);
+            } else {
+                out.append('%')
+                        .append(Character.toUpperCase(Character.forDigit((b >> 4) & 0xf, 16)))
+                        .append(Character.toUpperCase(Character.forDigit(b & 0xf, 16)));
+            }
+        }
+        return out.toString();
     }
 
     /**

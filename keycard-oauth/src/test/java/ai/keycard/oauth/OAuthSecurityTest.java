@@ -173,6 +173,29 @@ class OAuthSecurityTest {
         }
     }
 
+    @Test
+    @DisplayName("Basic credentials are percent-encoded per RFC 6749 2.3.1: a colon in the id, %, + and space survive")
+    void basicPercentEncoding() {
+        String header = ClientAuthentication.basic("urn:app:billing", "p%ss+w rd/é")
+                .headers()
+                .get("Authorization");
+        String decoded = new String(
+                java.util.Base64.getDecoder().decode(header.substring("Basic ".length())), StandardCharsets.UTF_8);
+        assertThat(decoded).isEqualTo("urn%3Aapp%3Abilling:p%25ss%2Bw%20rd%2F%C3%A9");
+        // The server splits at the first colon and decodes each half.
+        int colon = decoded.indexOf(':');
+        assertThat(URLDecoder.decode(decoded.substring(0, colon).replace("+", "%2B"), StandardCharsets.UTF_8))
+                .isEqualTo("urn:app:billing");
+        assertThat(URLDecoder.decode(decoded.substring(colon + 1).replace("+", "%2B"), StandardCharsets.UTF_8))
+                .isEqualTo("p%ss+w rd/é");
+        assertThat(ClientAuthentication.basic("my-client", "s3cret_A.b~")
+                        .headers()
+                        .get("Authorization"))
+                .isEqualTo("Basic "
+                        + java.util.Base64.getEncoder()
+                                .encodeToString("my-client:s3cret_A.b~".getBytes(StandardCharsets.UTF_8)));
+    }
+
     private static Map<String, String> query(URI url) {
         Map<String, String> params = new LinkedHashMap<>();
         for (String pair : url.getRawQuery().split("&")) {
