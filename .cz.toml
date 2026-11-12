@@ -2,7 +2,7 @@
 name = "cz_customize"
 # One lockstep version for every module. cz owns this and gradle.properties; never
 # hand-edit either (scripts/changelog.py check-drift fails CI on a mismatch).
-version = "0.1.0"
+version = "0.1.1"
 version_scheme = "semver"
 # README.md: the install snippets, so they always name the latest release.
 version_files = ["gradle.properties:^version=", "README.md:keycard-bom:|<version>"]
