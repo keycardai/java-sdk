@@ -9,8 +9,9 @@ Every module releases together under one version, `v<version>`, to Maven Central
 2. `main.yml` runs `scripts/changelog.py changes`, which asks commitizen whether anything since
    the last `v*` tag matches the release types below.
 3. If so, it calls `bump-package.yml`, which runs `scripts/bump_package.py`: `cz bump
-   --files-only` rewrites `.cz.toml`, `gradle.properties` and `CHANGELOG.md`, the release app
-   opens a bump PR, merges it once checks are green, and creates `v<version>` at the squash SHA.
+   --files-only` rewrites `.cz.toml`, `gradle.properties`, `CHANGELOG.md` and the README's
+   install snippets, the release app opens a bump PR, merges it once checks are green, and
+   creates `v<version>` at the squash SHA.
 4. That tag triggers `release.yml`, which checks the tag against `gradle.properties`, builds and
    tests every module, signs them, uploads one deployment to the Central Portal, releases it,
    and waits until `keycard-bom` resolves from `repo1.maven.org`.
@@ -28,8 +29,9 @@ lands as a minor; flip it to `false` at 1.0.0.
 Squash merges are what `main` sees, so the PR title is the commit subject. CI checks the PR
 title and the PR's commits with `cz check`, and re-checks when the title is edited.
 
-Never hand-edit the version in `gradle.properties` or `.cz.toml`, or `CHANGELOG.md`: `cz bump`
-owns all three, and `changelog.py check-drift` fails CI when the two version lines disagree.
+Never hand-edit the version in `gradle.properties`, `.cz.toml` or the README's install
+snippets, or `CHANGELOG.md`: `cz bump` owns them all, and `changelog.py check-drift` fails CI
+when the `gradle.properties` and `.cz.toml` versions disagree.
 
 ## Repo settings this depends on
 

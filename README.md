@@ -6,10 +6,48 @@ Java SDK for the Keycard agentic identity platform, built to the same contract a
 [Go](https://github.com/keycardai/go-sdk) and
 [Ruby](https://github.com/keycardai/ruby-sdk) SDKs.
 
-Preview: nothing is on Maven Central yet, and the API may change before 1.0. The first
-release publishes every module below under the `ai.keycard` group, pinned by `keycard-bom`.
-Where it stands against the shared specs, row by row and against a live zone, is in
-[docs/conformance-report.md](docs/conformance-report.md).
+Preview: the API may change before 1.0. Where it stands against the shared specs, row by
+row and against a live zone, is in [docs/conformance-report.md](docs/conformance-report.md).
+
+## Install
+
+Every module is on Maven Central under the `ai.keycard` group and releases under one
+version. Import `keycard-bom` and leave the version off each module. Requires Java 17 or
+newer.
+
+Gradle:
+
+```kotlin
+dependencies {
+    implementation(platform("ai.keycard:keycard-bom:0.1.0"))
+    implementation("ai.keycard:keycard-oauth")
+}
+```
+
+Maven:
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>ai.keycard</groupId>
+      <artifactId>keycard-bom</artifactId>
+      <version>0.1.0</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+
+<dependencies>
+  <dependency>
+    <groupId>ai.keycard</groupId>
+    <artifactId>keycard-oauth</artifactId>
+  </dependency>
+</dependencies>
+```
+
+Add the other modules below the same way.
 
 ## Modules
 
