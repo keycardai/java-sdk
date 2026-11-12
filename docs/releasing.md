@@ -75,6 +75,11 @@ The public half of the signing key must be on a keyserver Central checks
 (`gpg --keyserver keys.openpgp.org --send-keys <id>`), or Central rejects the deployment.
 Give the key a two-year expiry and calendar the renewal.
 
+Both the signing key and the Portal user token expire, and a release fails at the upload once
+either has. Their expiry dates are recorded on their password manager items, each with a
+calendar reminder a few weeks ahead. The token lists its own expiry at
+central.sonatype.com/usertoken.
+
 To rotate the signing key: generate a new key, publish its public half, replace `SIGNING_KEY`,
 `SIGNING_KEY_ID` and `SIGNING_KEY_PASSWORD`, run a release, and only then revoke the old key.
 Artifacts already on Central stay verifiable against the old public key.
