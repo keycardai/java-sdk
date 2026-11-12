@@ -61,6 +61,15 @@ tasks.jar {
     }
 }
 
+// The MIT notice has to travel with every copy, and the POM only names the
+// license, so each jar (classes, sources, Javadoc) carries the text itself.
+// The base Jar type, because the publishing plugin's Javadoc jar isn't the
+// java plugin's bundling Jar.
+val licenseFile = rootProject.layout.projectDirectory.file("LICENSE")
+tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+    from(licenseFile) { into("META-INF") }
+}
+
 spotless {
     java {
         palantirJavaFormat(libs.findVersion("palantir-java-format").get().requiredVersion)
