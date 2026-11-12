@@ -38,9 +38,6 @@ jobs:
     # access could change) never runs.
     if: github.ref == 'refs/heads/main' && inputs.target_branch == 'main'
     runs-on: ubuntu-latest
-    # The app key lives in this environment, which only main may deploy to, so a
-    # workflow edited on another branch can't read it.
-    environment: bump
     permissions:
       contents: write
       pull-requests: write

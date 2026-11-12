@@ -33,20 +33,27 @@ owns all three, and `changelog.py check-drift` fails CI when the two version lin
 
 ## Repo settings this depends on
 
-| Setting | Value |
-| --- | --- |
-| Variable `SDK_RELEASE_APP_ID` | the Keycard SDK Release app id (a repository variable) |
-| Environment `bump` | deployment branches: `main` only; holds the secret `SDK_RELEASE_PRIVATE_KEY`, the app's private key |
-| Environment `release` | deployment tags: `v*` only; holds the five secrets below; add required reviewers to approve each publish |
-| Tag ruleset on `v*` | only the release app and repository admins may create, update or delete them |
-| Allow auto-merge, squash merge | enabled |
+The setup matches ruby-sdk's. Two groups, and only the second needs an org admin.
 
-The secrets live in environments, not at the repository level, because a repository secret is
-readable by a workflow on any branch, and anyone who can push a branch can edit a workflow.
-`release.yml` also refuses a tag that doesn't point at a commit on `main`.
+| Setting | Who sets it | Needed for |
+| --- | --- | --- |
+| Environment `release`, holding the five secrets below | a repository admin | every publish, including the hand-tagged `v0.1.0` |
+| Allow auto-merge, squash merge | a repository admin | the bump PR merging itself |
+| The Keycard SDK Release app installed on this repository | an org admin | automated bumps |
+| Org variable `SDK_RELEASE_APP_ID` and org secret `SDK_RELEASE_PRIVATE_KEY`, shared with this repository | an org admin | automated bumps |
 
 `main.yml` skips the bump while `SDK_RELEASE_APP_ID` is unset and logs a warning, so an
-unconfigured repo is visible rather than quiet.
+unconfigured repo is visible rather than quiet. To confirm the org settings reach this repo:
+
+```sh
+gh api repos/keycardai/java-sdk/actions/organization-variables --jq '.variables[].name'
+gh api repos/keycardai/java-sdk/actions/organization-secrets --jq '.secrets[].name'
+```
+
+`release.yml` refuses a tag that doesn't point at a commit on `main`. A repository admin can
+tighten this further without anyone else: limit the `release` environment to `v*` tags, add
+required reviewers so each publish waits for an approval, and add a tag ruleset on `v*` with
+the release app as a bypass actor.
 
 | `release` secret | What it is |
 | --- | --- |
