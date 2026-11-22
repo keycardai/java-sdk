@@ -1,3 +1,21 @@
+## v0.1.2 (2026-11-22)
+
+
+- fix(oauth): WorkloadIdentity requires a client id before an interactive grant (#2)
+- The authorization code, refresh and device grants need a v2 token
+credential, which the zone resolves by client_id. The credential setter on
+AuthorizationCodeClient.Builder and DeviceAuthorizationClient.Builder
+rejects a WorkloadIdentity without a client id with a
+ConfigurationException, so no request is sent, discovery included, and
+the source is not called. ClientCredentialsClient and token exchange do
+not check.
+- Workload Identity spec-version 4 (rows 4d, 4e), Authorization Code with
+PKCE spec-version 8 (row 34), Device Authorization spec-version 5 (row 34).
+- Refs SDK-122
+- Co-authored-by: Larry Osakwe <23560354+Larry-Osakwe@users.noreply.github.com>
+
+## v0.1.1 (2026-11-12)
+
 ## v0.1.0 (2026-11-12)
 
 
