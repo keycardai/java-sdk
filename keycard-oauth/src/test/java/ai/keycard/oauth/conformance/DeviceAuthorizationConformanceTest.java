@@ -21,6 +21,7 @@ import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.TokenExchangeContext;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
+import ai.keycard.oauth.WorkloadIdentity;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.RecordedRequest;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
@@ -105,6 +106,20 @@ class DeviceAuthorizationConformanceTest {
         assertThatThrownBy(() -> DeviceAuthorizationClient.builder(URI.create("https://zone.example"))
                         .build())
                 .isInstanceOf(ConfigurationException.class);
+    }
+
+    @Test
+    @DisplayName("row 34: a WorkloadIdentity without client_id is a configuration error before any request")
+    void row34() {
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            assertThatThrownBy(() -> DeviceAuthorizationClient.builder(zone.issuer())
+                            .credential(WorkloadIdentity.of(() -> {
+                                throw new AssertionError("the source is not called");
+                            })))
+                    .isExactlyInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("clientId is required for interactive grants");
+            assertThat(zone.requests()).isEmpty();
+        }
     }
 
     @Test

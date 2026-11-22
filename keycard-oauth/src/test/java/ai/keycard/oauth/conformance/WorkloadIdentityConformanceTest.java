@@ -3,8 +3,11 @@ package ai.keycard.oauth.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.AuthorizationCodeClient;
 import ai.keycard.oauth.ClientAuthentication;
 import ai.keycard.oauth.ClientCredentialsClient;
+import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.DeviceAuthorizationClient;
 import ai.keycard.oauth.FileTokenSource;
 import ai.keycard.oauth.GcpMetadataTokenSource;
 import ai.keycard.oauth.HttpStatusException;
@@ -169,6 +172,57 @@ class WorkloadIdentityConformanceTest {
                         Map.entry("client_id", "app-cred-1"));
         assertThat(without.formFields()).containsOnlyKeys("client_assertion", "client_assertion_type");
         assertThat(with.formFields()).doesNotContainKey("subject_token_type");
+    }
+
+    @Test
+    @DisplayName("row 4d: the code exchange, refresh and device clients refuse a credential without client_id")
+    void row4d() {
+        AtomicInteger calls = new AtomicInteger();
+        WorkloadIdentity withoutId = WorkloadIdentity.of(() -> {
+            calls.incrementAndGet();
+            return "platform-token";
+        });
+        String message = "WorkloadIdentity: clientId is required for interactive grants"
+                + " (the public ID of a v2 token credential)";
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            assertThatThrownBy(
+                            () -> AuthorizationCodeClient.builder(zone.issuer()).credential(withoutId))
+                    .isExactlyInstanceOf(ConfigurationException.class)
+                    .hasMessage(message);
+            assertThatThrownBy(() ->
+                            DeviceAuthorizationClient.builder(zone.issuer()).credential(withoutId))
+                    .isExactlyInstanceOf(ConfigurationException.class)
+                    .hasMessage(message);
+            assertThat(zone.requests()).isEmpty();
+            assertThat(calls).hasValue(0);
+
+            WorkloadIdentity withId = WorkloadIdentity.builder(() -> "platform-token")
+                    .clientId("app-cred-1")
+                    .build();
+            AuthorizationCodeClient.builder(zone.issuer()).credential(withId).build();
+            DeviceAuthorizationClient.builder(zone.issuer()).credential(withId).build();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4e: client credentials and token exchange run without client_id and don't send one")
+    void row4e() {
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            zone.respond("POST", StubZone.TOKEN_PATH, 200, "{\"access_token\":\"at\"}");
+            WorkloadIdentity withoutId = WorkloadIdentity.of(() -> "platform-token");
+
+            ClientCredentialsClient.builder(zone.issuer())
+                    .credential(withoutId)
+                    .build()
+                    .requestToken();
+
+            assertThat(zone.requests(StubZone.TOKEN_PATH).get(0).formParams())
+                    .containsEntry("client_assertion", List.of("platform-token"))
+                    .doesNotContainKey("client_id");
+            TokenExchangeRequest exchange = prepare(withoutId);
+            assertThat(exchange.clientAssertion()).isEqualTo("platform-token");
+            assertThat(exchange.clientId()).isNull();
+        }
     }
 
     @Test

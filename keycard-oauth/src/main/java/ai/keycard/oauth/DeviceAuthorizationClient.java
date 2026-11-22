@@ -385,16 +385,21 @@ public final class DeviceAuthorizationClient {
         }
 
         /**
-         * Authenticates every request with the credential's client authentication.
+         * Authenticates every request with the credential's client authentication. A {@link
+         * WorkloadIdentity} must have a client id.
          *
          * @param credential the credential
          * @return this builder
-         * @throws ConfigurationException when the credential doesn't provide client authentication
+         * @throws ConfigurationException when the credential doesn't provide client authentication,
+         *     or is a {@link WorkloadIdentity} without a client id
          */
         public Builder credential(Credential credential) {
             if (!(Objects.requireNonNull(credential, "credential") instanceof ClientAuthenticator authenticator)) {
                 throw new ConfigurationException(
                         credential.getClass().getName() + " does not provide client authentication");
+            }
+            if (credential instanceof WorkloadIdentity workload) {
+                workload.checkClientAuthentication();
             }
             this.credential = authenticator;
             return this;

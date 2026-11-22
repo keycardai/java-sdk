@@ -315,6 +315,20 @@ class AuthorizationCodePkceConformanceTest {
     }
 
     @Test
+    @DisplayName("row 34: a WorkloadIdentity without client_id is a configuration error before any request")
+    void row34() {
+        try (StubZone zone = zone()) {
+            assertThatThrownBy(
+                            () -> AuthorizationCodeClient.builder(zone.issuer()).credential(WorkloadIdentity.of(() -> {
+                                throw new AssertionError("the source is not called");
+                            })))
+                    .isExactlyInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("clientId is required for interactive grants");
+            assertThat(zone.requests()).isEmpty();
+        }
+    }
+
+    @Test
     @DisplayName("high-level flow: the loopback server receives the redirect and the code is exchanged")
     void loopbackFlow() {
         try (StubZone zone = zone()) {

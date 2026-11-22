@@ -596,16 +596,20 @@ public final class AuthorizationCodeClient {
 
         /**
          * A credential that authenticates the client instead of a client id and secret. It must
-         * provide client authentication.
+         * provide client authentication, and a {@link WorkloadIdentity} must have a client id.
          *
          * @param credential the credential
          * @return this builder
-         * @throws ConfigurationException when the credential can't authenticate the client
+         * @throws ConfigurationException when the credential can't authenticate the client, or is a
+         *     {@link WorkloadIdentity} without a client id
          */
         public Builder credential(Credential credential) {
             if (!(Objects.requireNonNull(credential, "credential") instanceof ClientAuthenticator authenticator)) {
                 throw new ConfigurationException(
                         credential.getClass().getName() + " does not provide client authentication");
+            }
+            if (credential instanceof WorkloadIdentity workload) {
+                workload.checkClientAuthentication();
             }
             this.credential = authenticator;
             return this;
