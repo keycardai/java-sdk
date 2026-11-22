@@ -97,6 +97,21 @@ public final class WorkloadIdentity implements Credential, ClientAuthenticator {
         return clientId;
     }
 
+    /**
+     * Throws unless a {@code client_id} is configured. The interactive grants (authorization code,
+     * refresh, device authorization) need a v2 token credential, which the zone resolves by {@code
+     * client_id}, so their clients call this when the credential is set, before any request.
+     * Client credentials and token exchange don't call it.
+     *
+     * @throws ConfigurationException when no client id is configured
+     */
+    void checkClientAuthentication() {
+        if (clientId == null) {
+            throw new ConfigurationException("WorkloadIdentity: clientId is required for interactive grants"
+                    + " (the public ID of a v2 token credential)");
+        }
+    }
+
     @Override
     public String toString() {
         return "WorkloadIdentity[source=" + source + ", clientId=" + clientId + "]";
