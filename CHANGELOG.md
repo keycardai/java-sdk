@@ -1,3 +1,10 @@
+## v0.1.3 (2026-11-23)
+
+
+- build: move the Gradle wrapper to 9.9.2 (#5)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+
 ## v0.1.2 (2026-11-22)
 
 
