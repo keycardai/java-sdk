@@ -6,21 +6,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ai.keycard.oauth.AuthorizationCodeClient;
 import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.InteractionTimeoutException;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.Pkce;
+import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.TokenTypes;
 import ai.keycard.oauth.WebAppFlow;
+import ai.keycard.oauth.WebIdentity;
 import ai.keycard.oauth.WorkloadIdentity;
+import ai.keycard.oauth.WorkloadIdentityRuntimeException;
 import ai.keycard.oauth.testing.StubZone;
+import com.nimbusds.jose.JWSObject;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -30,10 +36,11 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
- * authorization-code-pkce.md (spec-version 4, client authentication from base spec-version 5),
- * Unit Tests table. Row 13 (the removed single-resource argument) has no Java counterpart: Java
+ * authorization-code-pkce.md (spec-version 6, client authentication from base spec-version 5),
+ * Unit Tests table. Rows 19 and 22 run on begin and complete. Row 13 (the removed single-resource argument) has no Java counterpart: Java
  * never shipped that argument.
  */
 class AuthorizationCodePkceConformanceTest {
@@ -315,6 +322,130 @@ class AuthorizationCodePkceConformanceTest {
     }
 
     @Test
+    @DisplayName("row 17: a credential code exchange sends its form fields and headers, never subject_token_type")
+    void row17() {
+        try (StubZone zone = zone()) {
+            AuthorizationCodeClient.builder(zone.issuer())
+                    .credential(workload())
+                    .build()
+                    .exchangeCode("the-code", "v".repeat(43), REDIRECT);
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("grant_type", List.of("authorization_code"))
+                    .containsEntry("code", List.of("the-code"))
+                    .containsEntry("code_verifier", List.of("v".repeat(43)))
+                    .containsEntry("redirect_uri", List.of(REDIRECT.toString()))
+                    .containsEntry("client_assertion", List.of("platform-token"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("app-cred-1"))
+                    .doesNotContainKey("subject_token_type");
+            assertThat(request.header("Authorization")).isNull();
+
+            AuthorizationCodeClient.builder(zone.issuer())
+                    .credential(ClientSecret.of("web-app", "s3cret"))
+                    .build()
+                    .exchangeCode("c", "v".repeat(43), REDIRECT);
+            assertThat(zone.requests(StubZone.TOKEN_PATH).get(1).header("Authorization"))
+                    .isEqualTo("Basic " + ClientSecretConformanceTest.basic("web-app", "s3cret"));
+        }
+    }
+
+    @Test
+    @DisplayName("row 18: credential with client_id or client_secret, or without client authentication, fails first")
+    void row18() {
+        try (StubZone zone = zone()) {
+            assertThatThrownBy(() -> AuthorizationCodeClient.builder(zone.issuer())
+                            .credential(workload())
+                            .clientId("app-cred-1")
+                            .build())
+                    .isInstanceOf(ConfigurationException.class);
+            assertThatThrownBy(() -> AuthorizationCodeClient.builder(zone.issuer())
+                            .credential(workload())
+                            .clientSecret("s3cret")
+                            .build())
+                    .isInstanceOf(ConfigurationException.class);
+            Credential exchangeOnly = context ->
+                    TokenExchangeRequest.builder(context.subjectToken()).build();
+            assertThatThrownBy(
+                            () -> AuthorizationCodeClient.builder(zone.issuer()).credential(exchangeOnly))
+                    .isInstanceOf(ConfigurationException.class);
+            assertThat(zone.requests()).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("rows 19 and 22: begin sends the credential's client_id alone; complete adds the assertion")
+    void rows19And22() {
+        try (StubZone zone = zone()) {
+            AuthorizationCodeClient client = AuthorizationCodeClient.builder(zone.issuer())
+                    .credential(workload())
+                    .build();
+            WebAppFlow flow = client.begin(REDIRECT, List.of("openid"), List.of());
+
+            assertThat(query(flow.url()))
+                    .containsEntry("client_id", List.of("app-cred-1"))
+                    .doesNotContainKeys("client_assertion", "client_assertion_type");
+
+            client.complete(
+                    Map.of("code", "the-code", "state", flow.state()), flow.state(), flow.codeVerifier(), REDIRECT);
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("client_assertion", List.of("platform-token"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("app-cred-1"));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 20: a WebIdentity code exchange signs aud = the token endpoint, no Basic")
+    void row20(@TempDir Path dir) throws Exception {
+        try (StubZone zone = zone()) {
+            AuthorizationCodeClient.builder(zone.issuer())
+                    .credential(WebIdentity.builder()
+                            .keyId("kid-20")
+                            .storageDir(dir)
+                            .clientId("web-app")
+                            .build())
+                    .build()
+                    .exchangeCode("c", "v".repeat(43), REDIRECT);
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            String assertion = request.formParams().get("client_assertion").get(0);
+            assertThat(JWSObject.parse(assertion).getPayload().toJSONObject())
+                    .containsEntry("aud", zone.url(StubZone.TOKEN_PATH).toString());
+            assertThat(request.formParams())
+                    .containsEntry("client_assertion_type", List.of(WebIdentity.ASSERTION_TYPE));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 21: a client authentication failure is returned as is, with no token request")
+    void row21() {
+        WorkloadIdentityRuntimeException failure =
+                new WorkloadIdentityRuntimeException("token file gone", "file", null);
+        try (StubZone zone = zone()) {
+            AuthorizationCodeClient client = AuthorizationCodeClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.builder(() -> {
+                                throw failure;
+                            })
+                            .clientId("app-cred-1")
+                            .build())
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeCode("c", "v".repeat(43), REDIRECT))
+                    .isSameAs(failure);
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
+        }
+    }
+
+    @Test
     @DisplayName("row 34: a WorkloadIdentity without client_id is a configuration error before any request")
     void row34() {
         try (StubZone zone = zone()) {
@@ -375,6 +506,12 @@ class AuthorizationCodePkceConformanceTest {
         StubZone zone = StubZone.start().serveDiscovery();
         zone.respond("POST", StubZone.TOKEN_PATH, 200, TOKENS);
         return zone;
+    }
+
+    private static WorkloadIdentity workload() {
+        return WorkloadIdentity.builder(() -> "platform-token")
+                .clientId("app-cred-1")
+                .build();
     }
 
     private static AuthorizationCodeClient client(StubZone zone) {

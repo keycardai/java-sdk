@@ -149,8 +149,9 @@ public final class WorkloadIdentity implements Credential, ClientAuthenticator {
         }
 
         /**
-         * The Keycard application credential's id, sent as the {@code client_id} form parameter. A
-         * token-federation (v2) application credential requires it.
+         * The public ID of the Keycard application credential, sent as the {@code client_id} form
+         * parameter. A v2 token credential is resolved by this ID and requires it. A v1 token
+         * credential (deprecated) is resolved by the assertion's issuer and subject and rejects it.
          *
          * @param clientId the id
          * @return this builder

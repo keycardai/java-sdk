@@ -137,7 +137,7 @@ class TokenExchangeConformanceTest {
     }
 
     @Test
-    @DisplayName("row 4: an assertion-based credential's prepared request authenticates in the body")
+    @DisplayName("rows 4 and 4a: a prepared client_assertion, its type and client_id go in the body, no Basic")
     void row4PreparedByCredential() {
         try (StubZone zone = zone()) {
             TokenExchangeClient.builder(zone.issuer())

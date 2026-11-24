@@ -17,6 +17,7 @@ import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.TokenTypes;
 import ai.keycard.oauth.TransportResponse;
+import ai.keycard.oauth.WorkloadIdentity;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import ai.keycard.oauth.testing.TestClock;
@@ -107,6 +108,84 @@ class ClientCredentialsConformanceTest {
             assertThat(request.formParams())
                     .containsEntry("client_assertion", List.of("eyJ.assertion.sig"))
                     .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4a: client_assertion, client_assertion_type and client_id are form-encoded; no Basic")
+    void row4a() {
+        try (StubZone zone = zone()) {
+            client(zone)
+                    .requestToken(ClientCredentialsRequest.builder()
+                            .clientAssertion("eyJ.assertion.sig", TokenTypes.JWT_BEARER_ASSERTION)
+                            .clientId("app-cred-1")
+                            .build());
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("client_assertion", List.of("eyJ.assertion.sig"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("app-cred-1"));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4a: client_id without client_assertion is a configuration error before any request")
+    void row4aWithoutAssertion() {
+        try (StubZone zone = zone()) {
+            assertThatThrownBy(() -> ClientCredentialsRequest.builder()
+                            .clientId("app-cred-1")
+                            .build())
+                    .isInstanceOf(ConfigurationException.class);
+            assertThat(zone.requests()).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4a: an empty client_id is a configuration error before any request")
+    void row4aEmptyClientId() {
+        try (StubZone zone = zone()) {
+            assertThatThrownBy(() -> ClientCredentialsRequest.builder()
+                            .clientAssertion("eyJ.assertion.sig", TokenTypes.JWT_BEARER_ASSERTION)
+                            .clientId("")
+                            .build())
+                    .isExactlyInstanceOf(ConfigurationException.class)
+                    .hasMessage("clientId must not be empty");
+            assertThat(zone.requests()).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("the 0.1.3 four-argument constructor still builds a request, with no client id")
+    void fourArgumentConstructor() {
+        ClientCredentialsRequest request =
+                new ClientCredentialsRequest("read", null, "eyJ.assertion.sig", TokenTypes.JWT_BEARER_ASSERTION);
+
+        assertThat(request.clientAssertion()).isEqualTo("eyJ.assertion.sig");
+        assertThat(request.clientId()).isNull();
+    }
+
+    @Test
+    @DisplayName("credential operations: a WorkloadIdentity sends its assertion and client_id in the body, no Basic")
+    void workloadIdentity() {
+        try (StubZone zone = zone()) {
+            ClientCredentialsClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.builder(() -> "platform-token")
+                            .clientId("app-cred-1")
+                            .build())
+                    .build()
+                    .requestToken();
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("grant_type", List.of("client_credentials"))
+                    .containsEntry("client_assertion", List.of("platform-token"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("app-cred-1"));
             assertThat(request.header("Authorization")).isNull();
         }
     }
