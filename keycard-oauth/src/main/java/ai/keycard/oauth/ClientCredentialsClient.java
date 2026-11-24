@@ -78,7 +78,7 @@ public final class ClientCredentialsClient {
     /**
      * Requests a token.
      *
-     * @param request the scope, resource and optional caller-supplied assertion
+     * @param request the scope, resource and optional caller-supplied assertion and client id
      * @return the token
      * @throws ConfigurationException when the client has no credential and the request carries
      *     no assertion, or a multi-zone credential holds nothing for this zone
@@ -107,6 +107,9 @@ public final class ClientCredentialsClient {
             Map<String, String> fields = new LinkedHashMap<>();
             fields.put("client_assertion", request.clientAssertion());
             fields.put("client_assertion_type", Objects.requireNonNull(request.clientAssertionType()));
+            if (request.clientId() != null) {
+                fields.put("client_id", request.clientId());
+            }
             auth = ClientAuthentication.formFields(fields);
         } else {
             auth = Objects.requireNonNull(credential).authenticate(issuer, endpoint);

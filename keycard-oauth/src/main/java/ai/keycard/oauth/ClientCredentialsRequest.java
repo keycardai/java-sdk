@@ -12,28 +12,58 @@ import org.jspecify.annotations.Nullable;
  * @param clientAssertion a caller-supplied client assertion, or {@code null}; when set it
  *     authenticates the request on its own and the client's credential is not used
  * @param clientAssertionType the assertion's type, set whenever {@code clientAssertion} is
+ * @param clientId the {@code client_id} sent beside {@code clientAssertion}, naming the application
+ *     credential it authenticates as, or {@code null}; only valid with {@code clientAssertion}; never
+ *     empty
  */
 public record ClientCredentialsRequest(
         @Nullable String scope,
         @Nullable URI resource,
         @Nullable String clientAssertion,
-        @Nullable String clientAssertionType) {
+        @Nullable String clientAssertionType,
+        @Nullable String clientId) {
 
     /** A request with no scope, no resource and no assertion. */
-    public static final ClientCredentialsRequest EMPTY = new ClientCredentialsRequest(null, null, null, null);
+    public static final ClientCredentialsRequest EMPTY = new ClientCredentialsRequest(null, null, null, null, null);
 
     /**
-     * Validates that an assertion carries its type.
+     * Validates that an assertion carries its type, and that a client id rides only with an
+     * assertion.
+     *
+     * @param scope the scopes, or {@code null}
+     * @param resource the resource, or {@code null}
+     * @param clientAssertion the assertion, or {@code null}
+     * @param clientAssertionType the assertion's type, or {@code null}
+     * @param clientId the client id, or {@code null}
+     */
+    public ClientCredentialsRequest {
+        if (clientAssertion != null && clientAssertionType == null) {
+            throw new ConfigurationException("clientAssertionType is required when clientAssertion is set");
+        }
+        if (clientId != null && clientId.isEmpty()) {
+            throw new ConfigurationException("clientId must not be empty");
+        }
+        // Without an assertion the client's credential authenticates the request, which may be
+        // HTTP Basic; client_id never goes with Basic or another credential's fields.
+        if (clientId != null && clientAssertion == null) {
+            throw new ConfigurationException("clientId requires clientAssertion");
+        }
+    }
+
+    /**
+     * A request without a client id, the 0.1.3 signature.
      *
      * @param scope the scopes, or {@code null}
      * @param resource the resource, or {@code null}
      * @param clientAssertion the assertion, or {@code null}
      * @param clientAssertionType the assertion's type, or {@code null}
      */
-    public ClientCredentialsRequest {
-        if (clientAssertion != null && clientAssertionType == null) {
-            throw new ConfigurationException("clientAssertionType is required when clientAssertion is set");
-        }
+    public ClientCredentialsRequest(
+            @Nullable String scope,
+            @Nullable URI resource,
+            @Nullable String clientAssertion,
+            @Nullable String clientAssertionType) {
+        this(scope, resource, clientAssertion, clientAssertionType, null);
     }
 
     /**
@@ -53,7 +83,7 @@ public record ClientCredentialsRequest(
     @Override
     public String toString() {
         return "ClientCredentialsRequest[scope=" + scope + ", resource=" + resource + ", clientAssertionType="
-                + clientAssertionType + "]";
+                + clientAssertionType + ", clientId=" + clientId + "]";
     }
 
     /** Builds a {@link ClientCredentialsRequest}. */
@@ -63,6 +93,7 @@ public record ClientCredentialsRequest(
         private @Nullable URI resource;
         private @Nullable String clientAssertion;
         private @Nullable String clientAssertionType;
+        private @Nullable String clientId;
 
         private Builder() {}
 
@@ -103,12 +134,25 @@ public record ClientCredentialsRequest(
         }
 
         /**
+         * The {@code client_id} sent beside the client assertion.
+         *
+         * @param clientId the client id, or {@code null} for none
+         * @return this builder
+         */
+        public Builder clientId(@Nullable String clientId) {
+            this.clientId = clientId;
+            return this;
+        }
+
+        /**
          * Builds the request.
          *
          * @return the request
+         * @throws ConfigurationException when a client id is empty, or set without a client
+         *     assertion
          */
         public ClientCredentialsRequest build() {
-            return new ClientCredentialsRequest(scope, resource, clientAssertion, clientAssertionType);
+            return new ClientCredentialsRequest(scope, resource, clientAssertion, clientAssertionType, clientId);
         }
     }
 }
