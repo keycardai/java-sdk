@@ -1,3 +1,8 @@
+## v0.2.0 (2026-11-24)
+
+
+- feat(keycard-oauth): add client id and workload identity testing (#8)
+
 ## v0.1.3 (2026-11-23)
 
 
