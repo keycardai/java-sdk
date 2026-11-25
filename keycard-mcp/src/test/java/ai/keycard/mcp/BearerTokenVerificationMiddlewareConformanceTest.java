@@ -1,7 +1,9 @@
 package ai.keycard.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
 import ai.keycard.oauth.TokenVerifier;
@@ -187,6 +189,62 @@ class BearerTokenVerificationMiddlewareConformanceTest {
             }
         } finally {
             logger.removeHandler(capture);
+        }
+    }
+
+    @Test
+    @DisplayName("row 8a: a scalar audience matches the second configured audience")
+    void row8a() {
+        assertAudienceResponse("resource-b", 200);
+    }
+
+    @Test
+    @DisplayName("row 8b: a scalar audience with no match is 401 invalid_token")
+    void row8b() {
+        assertAudienceResponse("resource-c", 401);
+    }
+
+    @Test
+    @DisplayName("row 8c: an array audience with one match proceeds")
+    void row8c() {
+        assertAudienceResponse(List.of("resource-c", "resource-b"), 200);
+    }
+
+    @Test
+    @DisplayName("row 8d: an array audience with no match is 401 invalid_token")
+    void row8d() {
+        assertAudienceResponse(List.of("resource-c", "resource-d"), 401);
+    }
+
+    @Test
+    @DisplayName("row 8e: explicitly empty audiences are a configuration error")
+    void row8e() {
+        try (StubZone zone = TestServer.zone()) {
+            assertThatThrownBy(() ->
+                            TokenVerifier.builder(zone.issuer()).audiences().build())
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("audiences");
+        }
+    }
+
+    private void assertAudienceResponse(Object audience, int status) {
+        try (StubZone zone = TestServer.zone();
+                TestServer server = new TestServer()
+                        .filter(
+                                "/mcp",
+                                RequireBearerAuthFilter.builder(TokenVerifier.builder(zone.issuer())
+                                                .audiences("resource-a", "resource-b")
+                                                .build())
+                                        .build())
+                        .servlet("/mcp", new TestServer.Echo())
+                        .start()) {
+            String token = TestServer.tokenWithAudienceClaim(zone, "read", audience, TestServer.KEY.getKeyID());
+            HttpResponse<String> response = server.get("/mcp", "Authorization", "Bearer " + token);
+            assertThat(response.statusCode()).isEqualTo(status);
+            if (status == 401) {
+                assertThat(response.headers().firstValue("WWW-Authenticate").orElseThrow())
+                        .contains("error=\"invalid_token\"");
+            }
         }
     }
 
