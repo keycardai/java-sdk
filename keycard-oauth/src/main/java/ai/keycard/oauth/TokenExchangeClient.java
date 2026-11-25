@@ -129,7 +129,7 @@ public final class TokenExchangeClient {
      * @param request the request
      * @return the issued token
      * @throws ConfigurationException when the request carries no assertion and the client has no
-     *     credential that can authenticate it
+     *     credential that can authenticate it, or the request sets a client ID with HTTP Basic
      * @throws OAuthErrorException when the zone answers with an OAuth error
      * @throws KeycardException for discovery, HTTP, network and response-format failures
      */
@@ -138,6 +138,9 @@ public final class TokenExchangeClient {
     }
 
     private TokenResponse exchangeToken(TokenExchangeRequest request, boolean prepareAssertion) {
+        if (request.clientAssertion() == null && request.clientId() != null && credential instanceof ClientSecret) {
+            throw new ConfigurationException("token exchange clientId cannot be sent with HTTP Basic");
+        }
         TokenExchangeRequest withActor = request;
         if (actor != null && request.actorToken() == null) {
             withActor = request.toBuilder()
