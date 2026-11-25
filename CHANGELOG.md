@@ -1,3 +1,10 @@
+## v0.2.1 (2026-11-25)
+
+
+- fix(oauth): merge and deduplicate authorize URL queries (#11)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.2.0 (2026-11-24)
 
 
