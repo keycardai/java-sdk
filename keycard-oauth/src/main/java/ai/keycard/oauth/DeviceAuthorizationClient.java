@@ -162,7 +162,8 @@ public final class DeviceAuthorizationClient {
      * @param authorization the device authorization; only its device code is read
      * @return the token
      * @throws OAuthErrorException for every OAuth error, including the pending states; {@code
-     *     expired_token}, {@code access_denied} and {@code invalid_grant} are not retryable
+     *     expired_token}, {@code access_denied} and {@code invalid_grant} are retryable only on HTTP
+     *     429 or 5xx
      * @throws KeycardException for discovery, HTTP, network and response-format failures
      */
     public TokenResponse pollOnce(DeviceAuthorization authorization) {

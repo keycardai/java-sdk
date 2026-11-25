@@ -73,7 +73,7 @@ public final class WorkloadIdentity implements Credential, ClientAuthenticator {
      * client_assertion_type}, and {@code client_id} when configured. No headers.
      *
      * @param issuer the zone's issuer; unused, since the platform token isn't zone-specific
-     * @param endpoint the request's URL; unused, since the platform fixed the token's audience
+     * @param endpoint the assertion audience URL, unused because the platform sets the token's audience
      * @return the authentication
      * @throws WorkloadIdentityRuntimeException when the source fails
      */

@@ -141,7 +141,16 @@ class AuthorizationServerDiscoveryConformanceTest {
     void row5MistypedField() {
         try (StubZone zone = StubZone.start()) {
             for (Map.Entry<String, Object> field : Map.<String, Object>of(
-                            "token_endpoint", 42, "jwks_uri", "relative/path", "grant_types_supported", List.of(1))
+                            "token_endpoint",
+                            42,
+                            "jwks_uri",
+                            "relative/path",
+                            "grant_types_supported",
+                            List.of(1),
+                            "revocation_endpoint",
+                            "relative/path",
+                            "revocation_endpoint_auth_methods_supported",
+                            List.of(1))
                     .entrySet()) {
                 Map<String, Object> doc = document(zone);
                 doc.put(field.getKey(), field.getValue());
@@ -161,14 +170,11 @@ class AuthorizationServerDiscoveryConformanceTest {
     void row6() {
         try (StubZone zone = StubZone.start()) {
             Map<String, Object> doc = document(zone);
-            doc.put("revocation_endpoint", zone.url("/oauth/revoke").toString());
             doc.put("x_keycard_extension", Map.of("nested", true));
             serve(zone, doc);
 
             AuthorizationServerMetadata metadata = discovery.discover(zone.issuer());
 
-            assertThat(metadata.get("revocation_endpoint"))
-                    .isEqualTo(zone.url("/oauth/revoke").toString());
             assertThat(metadata.get("x_keycard_extension")).isEqualTo(Map.of("nested", true));
             assertThat(metadata.raw()).containsKeys("issuer", "token_endpoint", "x_keycard_extension");
         }
@@ -205,6 +211,40 @@ class AuthorizationServerDiscoveryConformanceTest {
             assertThat(metadata.deviceAuthorizationEndpoint()).isNull();
             assertThat(metadata.tokenEndpoint()).isNull();
             assertThat(metadata.grantTypesSupported()).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("row 12: revocation endpoint and authentication methods are typed")
+    void row12() {
+        try (StubZone zone = StubZone.start()) {
+            URI endpoint = zone.url("/oauth/2/revoke");
+            List<String> methods = List.of("client_secret_basic", "client_secret_post", "private_key_jwt", "none");
+            Map<String, Object> doc = document(zone);
+            doc.put("revocation_endpoint", endpoint.toString());
+            doc.put("revocation_endpoint_auth_methods_supported", methods);
+            serve(zone, doc);
+
+            AuthorizationServerMetadata metadata = discovery.discover(zone.issuer());
+
+            assertThat(metadata.revocationEndpoint()).isEqualTo(endpoint);
+            assertThat(metadata.revocationEndpointAuthMethodsSupported()).containsExactlyElementsOf(methods);
+            assertThat(metadata.get("revocation_endpoint")).isEqualTo(endpoint.toString());
+            assertThat(metadata.get("revocation_endpoint_auth_methods_supported"))
+                    .isEqualTo(methods);
+        }
+    }
+
+    @Test
+    @DisplayName("row 13: omitted revocation fields are absent without error")
+    void row13() {
+        try (StubZone zone = StubZone.start()) {
+            serve(zone, document(zone));
+
+            AuthorizationServerMetadata metadata = discovery.discover(zone.issuer());
+
+            assertThat(metadata.revocationEndpoint()).isNull();
+            assertThat(metadata.revocationEndpointAuthMethodsSupported()).isEmpty();
         }
     }
 

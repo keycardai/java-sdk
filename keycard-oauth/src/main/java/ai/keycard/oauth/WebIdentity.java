@@ -38,9 +38,9 @@ import org.jspecify.annotations.Nullable;
  *         .build();
  * }</pre>
  *
- * <p>Each assertion has {@code iss} and {@code sub} set to the client id, {@code aud} set to the
- * URL the request goes to, a new {@code jti}, and a 300-second lifetime. Safe to share between
- * threads.
+ * <p>Each assertion has {@code iss} and {@code sub} set to the client id, a new {@code jti},
+ * and a 300-second lifetime. The {@code aud} is the zone issuer for token revocation and the
+ * request endpoint for other operations. Safe to share between threads.
  */
 public final class WebIdentity implements Credential, ClientAuthenticator {
 
@@ -123,7 +123,7 @@ public final class WebIdentity implements Credential, ClientAuthenticator {
      * A newly signed assertion for the endpoint the request goes to, as form fields.
      *
      * @param issuer the zone's issuer; unused, since the client id names the client
-     * @param endpoint the URL the request goes to, signed as {@code aud}
+     * @param endpoint the assertion audience, signed as {@code aud}
      * @return {@code client_assertion} and {@code client_assertion_type}, and no headers
      * @throws ConfigurationException when no client id was configured
      */

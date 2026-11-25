@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
-/** Sends form POSTs to a token endpoint and parses what comes back. Shared by every grant. */
+/** Shares form POSTs and OAuth response parsing across grants and token revocation. */
 final class TokenEndpoint {
 
     private TokenEndpoint() {}

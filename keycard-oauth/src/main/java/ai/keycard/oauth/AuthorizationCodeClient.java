@@ -289,8 +289,9 @@ public final class AuthorizationCodeClient {
      * @param resources RFC 8707 resources to narrow to, or empty
      * @param scopes scopes to narrow to, or empty for the original grant
      * @return the renewed tokens
-     * @throws OAuthErrorException with {@code invalid_grant}, never retryable here, when the refresh
-     *     token is expired, revoked or another client's; sign in again
+     * @throws OAuthErrorException with {@code invalid_grant} when the refresh token is expired,
+     *     revoked or another client's. The error is retryable only on HTTP 429 or 5xx. Sign in
+     *     again on a permanent error.
      * @throws KeycardException for discovery, HTTP, network and response-format failures, which
      *     leave the refresh token usable
      */
