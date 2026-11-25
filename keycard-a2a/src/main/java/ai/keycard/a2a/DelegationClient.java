@@ -168,7 +168,7 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = transport.send(request);
+            response = transport.sendUnbounded(request);
         } catch (KeycardException e) {
             throw new A2aInvocationException(
                     "invocation of " + url + " failed: " + e.getMessage(), e, e.retryable(), 0, null);

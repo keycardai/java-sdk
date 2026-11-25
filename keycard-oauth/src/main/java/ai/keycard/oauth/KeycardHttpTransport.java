@@ -32,6 +32,20 @@ public interface KeycardHttpTransport {
     TransportResponse send(TransportRequest request);
 
     /**
+     * Sends one request without enforcing {@link #MAX_RESPONSE_BODY_BYTES}. Used for non-OAuth
+     * application payloads (such as A2A agent invocation replies) that share a transport with
+     * authorization-server calls.
+     *
+     * @param request the request
+     * @return the response, whatever its status
+     * @throws NetworkException on DNS, TLS, connect or timeout failures, or when the calling
+     *     thread is interrupted (the interrupt flag stays set)
+     */
+    default TransportResponse sendUnbounded(TransportRequest request) {
+        return send(request);
+    }
+
+    /**
      * The default transport: a JDK {@link HttpClient} that follows no redirects and connects
      * within {@link #DEFAULT_TIMEOUT}.
      *
