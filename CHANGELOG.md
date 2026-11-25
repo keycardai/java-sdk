@@ -1,3 +1,10 @@
+## v0.3.1 (2026-11-25)
+
+
+- fix(oauth): recheck device code expiry after each poll wait (#14)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.3.0 (2026-11-25)
 
 
