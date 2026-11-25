@@ -148,6 +148,10 @@ final class TestServer implements AutoCloseable {
     }
 
     static String token(StubZone zone, String scope, String audience, String kid) {
+        return tokenWithAudienceClaim(zone, scope, List.of(audience), kid);
+    }
+
+    static String tokenWithAudienceClaim(StubZone zone, String scope, Object audience, String kid) {
         long now = Instant.now().getEpochSecond();
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("iss", zone.issuer().toString());
@@ -155,7 +159,7 @@ final class TestServer implements AutoCloseable {
         claims.put("sub_profile", "user");
         claims.put("keycard_app_id", "app-1");
         claims.put("client_id", "client-1");
-        claims.put("aud", List.of(audience));
+        claims.put("aud", audience);
         claims.put("scope", scope);
         claims.put("iat", now);
         claims.put("exp", now + 300);

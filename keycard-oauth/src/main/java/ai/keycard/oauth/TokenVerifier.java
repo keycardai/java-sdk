@@ -158,8 +158,12 @@ public final class TokenVerifier {
          *
          * @param audiences the accepted audiences
          * @return this builder
+         * @throws ConfigurationException when no audience is supplied
          */
         public Builder audiences(String... audiences) {
+            if (audiences.length == 0) {
+                throw new ConfigurationException("audiences must not be empty");
+            }
             this.audiences = audiences.clone();
             return this;
         }
