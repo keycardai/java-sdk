@@ -34,14 +34,18 @@ import org.jspecify.annotations.Nullable;
 public record AccessToken(String token, Map<String, Object> claims) {
 
     /**
-     * Freezes the claims.
+     * Freezes the claims map and represents a single audience as a list.
      *
      * @param token the compact JWT
      * @param claims the verified claims
      */
     public AccessToken {
         Objects.requireNonNull(token, "token");
-        claims = Collections.unmodifiableMap(new LinkedHashMap<>(claims));
+        Map<String, Object> normalized = new LinkedHashMap<>(claims);
+        if (normalized.get("aud") instanceof String audience) {
+            normalized.put("aud", List.of(audience));
+        }
+        claims = Collections.unmodifiableMap(normalized);
     }
 
     /**
@@ -96,9 +100,6 @@ public record AccessToken(String token, Map<String, Object> claims) {
      */
     public List<String> audiences() {
         Object aud = claims.get("aud");
-        if (aud instanceof String single) {
-            return List.of(single);
-        }
         List<String> values = new ArrayList<>();
         if (aud instanceof Collection<?> many) {
             for (Object value : many) {
