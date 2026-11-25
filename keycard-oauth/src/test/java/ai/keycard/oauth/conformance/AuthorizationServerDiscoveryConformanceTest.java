@@ -38,13 +38,15 @@ class AuthorizationServerDiscoveryConformanceTest {
                     .discovery(discovery)
                     .clock(clock)
                     .build();
-            zone.respond("GET", StubZone.DISCOVERY_PATH, 503, "{}");
+            zone.respond(
+                    "GET", StubZone.DISCOVERY_PATH, new StubZone.StubResponse(503, Map.of("Retry-After", "5"), "{}"));
             assertThatThrownBy(() -> cache.get(zone.issuer())).isInstanceOf(HttpStatusException.class);
             zone.serveDiscovery();
+            clock.advance(Duration.ofMillis(4999));
             assertThatThrownBy(() -> cache.get(zone.issuer())).isInstanceOf(HttpStatusException.class);
             assertThat(zone.requests(StubZone.DISCOVERY_PATH)).hasSize(1);
             assertThat(discovery.discover(zone.issuer()).issuer()).isEqualTo(zone.issuer());
-            clock.advance(Duration.ofMillis(1200));
+            clock.advance(Duration.ofMillis(1));
             assertThat(cache.get(zone.issuer()).issuer()).isEqualTo(zone.issuer());
             assertThat(zone.requests(StubZone.DISCOVERY_PATH)).hasSize(3);
         }

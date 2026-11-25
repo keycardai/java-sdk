@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -120,28 +121,35 @@ class BaseMetadataCachingConformanceTest {
     void retryAfter() {
         for (int status : List.of(429, 503)) {
             for (long delay : List.of(5L, 120L)) {
-                for (boolean asDate : List.of(false, true)) {
-                    String header = asDate
-                            ? DateTimeFormatter.RFC_1123_DATE_TIME.format(
-                                    clock.instant().plusSeconds(delay).atZone(ZoneOffset.UTC))
-                            : Long.toString(delay);
-                    AtomicInteger calls = new AtomicInteger();
-                    AuthorizationServerMetadataCache cache = cache(
-                            request -> calls.incrementAndGet() == 1
-                                    ? new TransportResponse(status, Map.of("Retry-After", List.of(header)), "")
-                                    : ok(METADATA),
-                            Duration.ofHours(1),
-                            Duration.ofMinutes(1));
-                    assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
-                    clock.advance(Duration.ofSeconds(Math.min(60, delay)).minusMillis(1));
-                    assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
-                    assertThat(calls).hasValue(1);
-                    clock.advance(Duration.ofMillis(1));
-                    assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
-                    assertThat(calls).hasValue(2);
+                for (DateTimeFormatter formatter : List.of(
+                        DateTimeFormatter.RFC_1123_DATE_TIME,
+                        DateTimeFormatter.ofPattern("EEEE, dd-MMM-uu HH:mm:ss 'GMT'", Locale.US),
+                        DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss uuuu", Locale.US))) {
+                    assertRetryAfter(
+                            status,
+                            delay,
+                            formatter.format(clock.instant().plusSeconds(delay).atZone(ZoneOffset.UTC)));
                 }
+                assertRetryAfter(status, delay, Long.toString(delay));
             }
         }
+    }
+
+    private void assertRetryAfter(int status, long delay, String header) {
+        AtomicInteger calls = new AtomicInteger();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> calls.incrementAndGet() == 1
+                        ? new TransportResponse(status, Map.of("Retry-After", List.of(header)), "")
+                        : ok(METADATA),
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+        clock.advance(Duration.ofSeconds(Math.min(60, delay)).minusMillis(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(1);
+        clock.advance(Duration.ofMillis(1));
+        assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+        assertThat(calls).hasValue(2);
     }
 
     @Test
