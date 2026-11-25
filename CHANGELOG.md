@@ -1,3 +1,10 @@
+## v0.3.2 (2026-11-25)
+
+
+- fix(oauth): normalize the verified caller audience (#15)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.3.1 (2026-11-25)
 
 
