@@ -64,8 +64,9 @@ TokenRevocationClient revocation = TokenRevocationClient.builder(zone)
 revocation.revokeToken(refreshToken);
 ```
 
-Revoking a Keycard refresh token revokes its session. The client uses the zone's advertised
-revocation endpoint. Pass already discovered metadata to `builder(metadata)` to skip discovery.
+Revoking a Keycard refresh token revokes its session. The client discovers the zone over HTTPS
+and requires an HTTPS revocation endpoint. Pass already discovered metadata to `builder(metadata)`
+to skip discovery.
 
 ## Errors
 

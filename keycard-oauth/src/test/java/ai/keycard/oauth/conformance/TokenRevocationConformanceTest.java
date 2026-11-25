@@ -11,12 +11,14 @@ import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.HttpStatusException;
+import ai.keycard.oauth.KeycardHttpTransport;
 import ai.keycard.oauth.NetworkException;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.TokenExchangeContext;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenRevocationClient;
 import ai.keycard.oauth.TokenTypes;
+import ai.keycard.oauth.TransportRequest;
 import ai.keycard.oauth.WebIdentity;
 import ai.keycard.oauth.WorkloadIdentity;
 import ai.keycard.oauth.testing.StubZone;
@@ -35,6 +37,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -52,6 +55,8 @@ class TokenRevocationConformanceTest {
 
     // A nonstandard path makes derivation from the issuer fail.
     private static final String REVOKE_PATH = "/custom/revoke";
+    private static final URI ISSUER = URI.create("https://zone.example");
+    private static final URI REVOCATION_ENDPOINT = ISSUER.resolve(REVOKE_PATH);
     private static final String CLIENT_ID = "test-client";
 
     @TempDir
@@ -83,7 +88,7 @@ class TokenRevocationConformanceTest {
     @DisplayName("row 2: a client id and secret use HTTP Basic")
     void row2() {
         try (StubZone zone = zone()) {
-            TokenRevocationClient.builder(zone.issuer())
+            builder(zone)
                     .clientId("client:id")
                     .clientSecret("test+secret")
                     .build()
@@ -103,8 +108,9 @@ class TokenRevocationConformanceTest {
                     .clientId(CLIENT_ID)
                     .storageDir(keyDirectory)
                     .build();
-            TokenRevocationClient.builder(URI.create(zone.issuer() + "/"))
-                    .credential(new HeaderSigningCredential(identity, zone.issuer()))
+            TokenRevocationClient.builder(URI.create(ISSUER + "/"))
+                    .transport(transport(zone))
+                    .credential(new HeaderSigningCredential(identity))
                     .build()
                     .revokeToken("token");
 
@@ -117,8 +123,7 @@ class TokenRevocationConformanceTest {
             SignedJWT assertion = SignedJWT.parse(form.get("client_assertion").get(0));
             RSAKey key = (RSAKey) identity.publicJwks().getKeys().get(0);
             assertThat(assertion.verify(new RSASSAVerifier(key))).isTrue();
-            assertThat(assertion.getJWTClaimsSet().getAudience())
-                    .containsExactly(zone.issuer().toString());
+            assertThat(assertion.getJWTClaimsSet().getAudience()).containsExactly(ISSUER.toString());
         }
     }
 
@@ -149,7 +154,8 @@ class TokenRevocationConformanceTest {
     @Test
     @DisplayName("row 6: missing revocation endpoint fails without a fallback request")
     void row6() {
-        try (StubZone zone = StubZone.start().serveDiscovery()) {
+        try (StubZone zone = StubZone.start()) {
+            serveMetadataWithoutRevocation(zone);
             assertThatThrownBy(() -> publicClient(zone).revokeToken("token"))
                     .isInstanceOfSatisfying(ConfigurationException.class, e -> {
                         assertThat(e).hasMessageContaining("revocation_endpoint");
@@ -191,8 +197,10 @@ class TokenRevocationConformanceTest {
                     });
             onlyRevocationRequest(zone);
 
-            AuthorizationServerMetadata metadata =
-                    AuthorizationServerDiscovery.create().discover(zone.issuer());
+            AuthorizationServerMetadata metadata = AuthorizationServerDiscovery.builder()
+                    .transport(transport(zone))
+                    .build()
+                    .discover(ISSUER);
             AtomicInteger attempts = new AtomicInteger();
             Duration timeout = Duration.ofSeconds(3);
             TokenRevocationClient offline = TokenRevocationClient.builder(metadata)
@@ -200,7 +208,7 @@ class TokenRevocationConformanceTest {
                     .fetchTimeout(timeout)
                     .transport(request -> {
                         attempts.incrementAndGet();
-                        assertThat(request.uri()).isEqualTo(zone.url(REVOKE_PATH));
+                        assertThat(request.uri()).isEqualTo(REVOCATION_ENDPOINT);
                         assertThat(request.timeout()).isEqualTo(timeout);
                         throw new NetworkException("connection failed", new IOException("connection failed"));
                     })
@@ -219,24 +227,22 @@ class TokenRevocationConformanceTest {
     void row9() {
         try (StubZone zone = zone()) {
             Credential credential = ClientSecret.of(CLIENT_ID, "test-secret");
-            assertThatThrownBy(() -> TokenRevocationClient.builder(zone.issuer())
+            assertThatThrownBy(() -> builder(zone)
                             .credential(credential)
                             .clientId(CLIENT_ID)
                             .build())
                     .isInstanceOf(ConfigurationException.class);
-            assertThatThrownBy(() -> TokenRevocationClient.builder(zone.issuer())
+            assertThatThrownBy(() -> builder(zone)
                             .credential(credential)
                             .clientSecret("test-secret")
                             .build())
                     .isInstanceOf(ConfigurationException.class);
-            assertThatThrownBy(() -> TokenRevocationClient.builder(zone.issuer())
+            assertThatThrownBy(() -> builder(zone)
                             .credential(context -> TokenExchangeRequest.builder(context.subjectToken())
                                     .build())
                             .build())
                     .isInstanceOf(ConfigurationException.class);
-            assertThatThrownBy(() -> TokenRevocationClient.builder(zone.issuer())
-                            .clientSecret("test-secret")
-                            .build())
+            assertThatThrownBy(() -> builder(zone).clientSecret("test-secret").build())
                     .isInstanceOf(ConfigurationException.class);
             assertThat(zone.requests()).isEmpty();
         }
@@ -246,23 +252,11 @@ class TokenRevocationConformanceTest {
     @DisplayName("row 10: pre-discovered metadata bypasses discovery")
     void row10() {
         try (StubZone zone = zone()) {
-            AuthorizationServerMetadata metadata = new AuthorizationServerMetadata(
-                    zone.issuer(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    zone.url(REVOKE_PATH),
-                    List.of(),
-                    List.of(),
-                    List.of(),
-                    List.of(),
-                    Map.of());
-
-            TokenRevocationClient.builder(metadata).clientId(CLIENT_ID).build().revokeToken("token");
+            TokenRevocationClient.builder(metadata(REVOCATION_ENDPOINT))
+                    .clientId(CLIENT_ID)
+                    .transport(transport(zone))
+                    .build()
+                    .revokeToken("token");
 
             assertThat(zone.requests()).extracting(RecordedRequest::path).containsExactly(REVOKE_PATH);
         }
@@ -299,7 +293,7 @@ class TokenRevocationConformanceTest {
     void row13() throws JOSEException {
         try (StubZone zone = zone()) {
             JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                    .issuer(zone.issuer().toString())
+                    .issuer(ISSUER.toString())
                     .claim("sid", "session")
                     .claim("act", Map.of("sub", "actor"))
                     .build();
@@ -312,7 +306,7 @@ class TokenRevocationConformanceTest {
     void row14() throws JOSEException {
         try (StubZone zone = zone()) {
             JWTClaimsSet claims =
-                    new JWTClaimsSet.Builder().issuer(zone.issuer().toString()).build();
+                    new JWTClaimsSet.Builder().issuer(ISSUER.toString()).build();
             assertUnsupportedToken(zone, jwt("at+jwt", claims), "access token has no sid");
         }
     }
@@ -337,7 +331,7 @@ class TokenRevocationConformanceTest {
             String assertion = jwt(
                     "JWT",
                     new JWTClaimsSet.Builder().audience("workload-audience").build());
-            TokenRevocationClient.builder(zone.issuer())
+            builder(zone)
                     .credential(WorkloadIdentity.builder(() -> assertion)
                             .clientId(CLIENT_ID)
                             .build())
@@ -356,10 +350,8 @@ class TokenRevocationConformanceTest {
         try (StubZone zone = zone()) {
             TestClock clock = TestClock.start();
             zone.respond("GET", StubZone.DISCOVERY_PATH, new StubResponse(503, Map.of("Retry-After", "5"), ""));
-            TokenRevocationClient client = TokenRevocationClient.builder(zone.issuer())
-                    .clock(clock)
-                    .clientId(CLIENT_ID)
-                    .build();
+            TokenRevocationClient client =
+                    builder(zone).clock(clock).clientId(CLIENT_ID).build();
 
             assertThatThrownBy(() -> client.revokeToken("first")).isInstanceOf(HttpStatusException.class);
             serveRevocationMetadata(zone);
@@ -379,9 +371,10 @@ class TokenRevocationConformanceTest {
     @Test
     @DisplayName("discovery can pick up a newly advertised revocation endpoint after the negative TTL")
     void missingEndpointExpires() {
-        try (StubZone zone = StubZone.start().serveDiscovery()) {
+        try (StubZone zone = StubZone.start()) {
+            serveMetadataWithoutRevocation(zone);
             TestClock clock = TestClock.start();
-            TokenRevocationClient client = TokenRevocationClient.builder(zone.issuer())
+            TokenRevocationClient client = builder(zone)
                     .clock(clock)
                     .negativeTtl(Duration.ofSeconds(5))
                     .clientId(CLIENT_ID)
@@ -402,6 +395,45 @@ class TokenRevocationConformanceTest {
         }
     }
 
+    @Test
+    @DisplayName("revocation rejects cleartext endpoints in discovered and supplied metadata")
+    void rejectsCleartextRevocationEndpoint() {
+        try (StubZone zone = StubZone.start()) {
+            URI insecureEndpoint = zone.url(REVOKE_PATH);
+            AuthorizationServerDiscoveryConformanceTest.serve(
+                    zone, Map.of("issuer", ISSUER.toString(), "revocation_endpoint", insecureEndpoint.toString()));
+            for (TokenRevocationClient.Builder builder : List.of(
+                    builder(zone),
+                    TokenRevocationClient.builder(metadata(insecureEndpoint)).transport(transport(zone)))) {
+                TokenRevocationClient client =
+                        builder.clientId(CLIENT_ID).clientSecret("test-secret").build();
+                assertThatThrownBy(() -> client.revokeToken("token"))
+                        .isInstanceOf(ConfigurationException.class)
+                        .hasMessageContaining("revocation_endpoint must be an HTTPS URL");
+            }
+            assertThat(zone.requests()).extracting(RecordedRequest::path).containsExactly(StubZone.DISCOVERY_PATH);
+        }
+    }
+
+    @Test
+    @DisplayName("revocation discovery requires an HTTPS issuer")
+    void rejectsCleartextDiscoveryIssuer() {
+        assertThatThrownBy(() -> TokenRevocationClient.builder(URI.create("http://zone.example")))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("issuer must be an HTTPS URL");
+    }
+
+    @Test
+    @DisplayName("the revocation client rejects a JDK transport configured to follow redirects")
+    void rejectsRedirectFollowingHttpClient() {
+        HttpClient http = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.ALWAYS)
+                .build();
+        assertThatThrownBy(() -> TokenRevocationClient.builder(ISSUER).httpClient(http))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("redirects to be disabled");
+    }
+
     private static StubZone zone() {
         StubZone zone = StubZone.start();
         serveRevocationMetadata(zone);
@@ -410,16 +442,40 @@ class TokenRevocationConformanceTest {
 
     private static void serveRevocationMetadata(StubZone zone) {
         AuthorizationServerDiscoveryConformanceTest.serve(
-                zone,
-                Map.of(
-                        "issuer",
-                        zone.issuer().toString(),
-                        "revocation_endpoint",
-                        zone.url(REVOKE_PATH).toString()));
+                zone, Map.of("issuer", ISSUER.toString(), "revocation_endpoint", REVOCATION_ENDPOINT.toString()));
+    }
+
+    private static void serveMetadataWithoutRevocation(StubZone zone) {
+        AuthorizationServerDiscoveryConformanceTest.serve(zone, Map.of("issuer", ISSUER.toString()));
     }
 
     private static TokenRevocationClient publicClient(StubZone zone) {
-        return TokenRevocationClient.builder(zone.issuer()).clientId(CLIENT_ID).build();
+        return builder(zone).clientId(CLIENT_ID).build();
+    }
+
+    private static TokenRevocationClient.Builder builder(StubZone zone) {
+        return TokenRevocationClient.builder(ISSUER).transport(transport(zone));
+    }
+
+    private static AuthorizationServerMetadata metadata(URI endpoint) {
+        return new AuthorizationServerMetadata(
+                ISSUER, null, null, null, null, null, null, null, endpoint, List.of(), List.of(), List.of(), List.of(),
+                Map.of());
+    }
+
+    private static KeycardHttpTransport transport(StubZone zone) {
+        KeycardHttpTransport http = KeycardHttpTransport.create();
+        // Keep HTTPS URLs at the SDK boundary and deliver those requests to the loopback stub.
+        return request -> {
+            URI path = ISSUER.relativize(request.uri());
+            assertThat(path.isAbsolute()).isFalse();
+            return http.send(new TransportRequest(
+                    request.method(),
+                    zone.issuer().resolve(path),
+                    request.headers(),
+                    request.body(),
+                    request.timeout()));
+        };
     }
 
     private static RecordedRequest onlyRevocationRequest(StubZone zone) {
@@ -463,8 +519,7 @@ class TokenRevocationConformanceTest {
         return jwt.serialize();
     }
 
-    private record HeaderSigningCredential(WebIdentity identity, URI expectedIssuer)
-            implements Credential, ClientAuthenticator {
+    private record HeaderSigningCredential(WebIdentity identity) implements Credential, ClientAuthenticator {
 
         @Override
         public TokenExchangeRequest prepareTokenExchangeRequest(TokenExchangeContext context) {
@@ -473,8 +528,8 @@ class TokenRevocationConformanceTest {
 
         @Override
         public ClientAuthentication authenticate(URI issuer, URI endpoint) {
-            assertThat(issuer).isEqualTo(expectedIssuer);
-            assertThat(endpoint).isEqualTo(expectedIssuer);
+            assertThat(issuer).isEqualTo(ISSUER);
+            assertThat(endpoint).isEqualTo(ISSUER);
             return new ClientAuthentication(
                     Map.of("X-Test-Auth", "present"),
                     identity.authenticate(issuer, endpoint).formFields());

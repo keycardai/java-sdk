@@ -43,11 +43,13 @@ public final class TokenRevocationClient {
     /**
      * A builder that resolves the revocation endpoint by discovery.
      *
-     * @param issuer the zone's issuer
+     * @param issuer the zone's HTTPS issuer
      * @return a new builder
+     * @throws ConfigurationException if the issuer is not an HTTPS issuer URL
      */
     public static Builder builder(URI issuer) {
         AuthorizationServerDiscovery.metadataUrl(Objects.requireNonNull(issuer, "issuer"));
+        requireHttps(issuer, "issuer");
         return new Builder(issuer, null);
     }
 
@@ -65,8 +67,8 @@ public final class TokenRevocationClient {
      * Revokes a token with the default {@code refresh_token} hint.
      *
      * @param token the token to revoke
-     * @throws ConfigurationException if the token is missing or empty or the zone advertises no
-     *     revocation endpoint
+     * @throws ConfigurationException if the token is missing or empty or the metadata has no
+     *     valid HTTPS revocation endpoint
      * @throws KeycardException on discovery, OAuth, HTTP or network failures
      */
     public void revokeToken(String token) {
@@ -79,8 +81,8 @@ public final class TokenRevocationClient {
      *
      * @param token the token to revoke
      * @param tokenTypeHint the hint to send as {@code token_type_hint}
-     * @throws ConfigurationException if the token is missing or empty or the zone advertises no
-     *     revocation endpoint
+     * @throws ConfigurationException if the token is missing or empty or the metadata has no
+     *     valid HTTPS revocation endpoint
      * @throws OAuthErrorException if the server returns an OAuth error such as {@code
      *     invalid_client}, {@code invalid_grant}, or {@code unsupported_token_type}
      * @throws KeycardException on discovery, HTTP or network failures
@@ -98,6 +100,8 @@ public final class TokenRevocationClient {
             }
             throw new ConfigurationException("the zone " + issuer + " advertises no revocation_endpoint");
         }
+        // RFC 7009 requires HTTPS for the token and client authentication.
+        requireHttps(endpoint, "revocation_endpoint");
 
         // Revocation uses the zone issuer as the private-key JWT audience.
         URI zoneIssuer = metadata.issuer();
@@ -105,6 +109,12 @@ public final class TokenRevocationClient {
         TransportResponse response = TokenEndpoint.send(transport, endpoint, form, auth, fetchTimeout);
         if (response.status() != 200) {
             throw TokenEndpoint.error(response, "token revocation request");
+        }
+    }
+
+    private static void requireHttps(URI uri, String field) {
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+            throw new ConfigurationException(field + " must be an HTTPS URL");
         }
     }
 
@@ -173,7 +183,8 @@ public final class TokenRevocationClient {
         }
 
         /**
-         * The transport for discovery and revocation requests.
+         * The transport for discovery and revocation requests. Configure custom transports
+         * to send requests to the supplied URI over HTTPS with redirects disabled.
          *
          * @param transport the transport
          * @return this builder
@@ -184,12 +195,16 @@ public final class TokenRevocationClient {
         }
 
         /**
-         * Sends requests through this JDK client.
+         * Sends requests through this JDK client with redirects disabled.
          *
          * @param client the client
          * @return this builder
+         * @throws ConfigurationException if the client follows redirects
          */
         public Builder httpClient(HttpClient client) {
+            if (client.followRedirects() != HttpClient.Redirect.NEVER) {
+                throw new ConfigurationException("token revocation requires HTTP redirects to be disabled");
+            }
             return transport(KeycardHttpTransport.of(client));
         }
 
