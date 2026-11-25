@@ -180,6 +180,26 @@ class BaseMetadataCachingConformanceTest {
     }
 
     @Test
+    @DisplayName("row 3: invalidating one issuer preserves another issuer's pending retry")
+    void invalidationPreservesOtherIssuersPendingRetry() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<AuthorizationServerMetadataCache> cacheRef = new AtomicReference<>();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> {
+                    calls.incrementAndGet();
+                    cacheRef.get().invalidate(URI.create("https://other.example.com"));
+                    return new TransportResponse(503, Map.of("Retry-After", List.of("60")), "");
+                },
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        cacheRef.set(cache);
+        var first = org.assertj.core.api.Assertions.catchThrowable(() -> cache.get(ISSUER));
+        assertThat(first).isInstanceOf(HttpStatusException.class);
+        assertThatThrownBy(() -> cache.get(ISSUER)).isSameAs(first);
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
     @DisplayName("row 3: retry pacing evicts the oldest issuer when its cache is full")
     void boundsRetryCache() {
         AtomicInteger calls = new AtomicInteger();

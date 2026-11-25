@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
@@ -41,7 +42,6 @@ public final class AuthorizationServerMetadataCache {
     private final MetadataRetry.Cache<String> retries = new MetadataRetry.Cache<>();
     private final LongSupplier retryTicker;
     private final Object writes = new Object();
-    private long generation;
     private final SingleFlight<String, AuthorizationServerMetadata> inFlight = new SingleFlight<>();
 
     private AuthorizationServerMetadataCache(Builder builder) {
@@ -95,7 +95,7 @@ public final class AuthorizationServerMetadataCache {
         if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
             return entry.unwrap();
         }
-        return inFlight.run(key, () -> fetch(key, issuer), "discovery of " + issuer);
+        return inFlight.runGuarded(key, current -> fetch(key, issuer, current), "discovery of " + issuer);
     }
 
     /**
@@ -154,29 +154,26 @@ public final class AuthorizationServerMetadataCache {
      * @param issuer the issuer to forget
      */
     public void invalidate(URI issuer) {
+        String key = key(issuer);
         synchronized (writes) {
-            generation++;
-            entries.remove(key(issuer));
-            retries.remove(key(issuer));
-            inFlight.forget(key(issuer));
+            entries.remove(key);
+            retries.remove(key);
+            inFlight.forget(key);
         }
     }
 
     /** Drops every cached outcome. */
     public void clear() {
         synchronized (writes) {
-            generation++;
             entries.clear();
             retries.clear();
             inFlight.forgetAll();
         }
     }
 
-    private AuthorizationServerMetadata fetch(String key, URI issuer) {
+    private AuthorizationServerMetadata fetch(String key, URI issuer, BooleanSupplier current) {
         // Another caller may have finished a fetch while this one waited to lead.
-        long started;
         synchronized (writes) {
-            started = generation;
             Entry entry = entries.get(key);
             if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
                 return entry.unwrap();
@@ -186,7 +183,7 @@ public final class AuthorizationServerMetadataCache {
         try {
             AuthorizationServerMetadata metadata = discovery.discover(issuer);
             synchronized (writes) {
-                if (generation == started) {
+                if (current.getAsBoolean()) {
                     entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
                     retries.remove(key);
                 }
@@ -195,7 +192,7 @@ public final class AuthorizationServerMetadataCache {
         } catch (KeycardException e) {
             boolean interrupted = e.getCause() instanceof InterruptedException;
             synchronized (writes) {
-                if (!interrupted && generation == started) {
+                if (!interrupted && current.getAsBoolean()) {
                     if (e.retryable()) {
                         retries.record(key, retryTicker.getAsLong(), clock.instant(), e);
                     } else if (!negativeTtl.isZero()) {

@@ -3,6 +3,8 @@ package ai.keycard.oauth;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -24,11 +26,15 @@ final class SingleFlight<K, V> {
      * @param waitingFor names the work in the exception an interrupted waiter gets
      */
     V run(K key, Supplier<V> fetch, String waitingFor) {
+        return runGuarded(key, current -> fetch.get(), waitingFor);
+    }
+
+    V runGuarded(K key, Function<BooleanSupplier, V> fetch, String waitingFor) {
         while (true) {
             CompletableFuture<V> mine = new CompletableFuture<>();
             CompletableFuture<V> shared = inFlight.putIfAbsent(key, mine);
             if (shared == null) {
-                return lead(key, fetch, mine);
+                return lead(key, () -> fetch.apply(() -> inFlight.get(key) == mine), mine);
             }
             try {
                 return shared.get();
