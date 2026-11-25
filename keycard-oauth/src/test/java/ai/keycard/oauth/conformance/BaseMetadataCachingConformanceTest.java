@@ -122,7 +122,7 @@ class BaseMetadataCachingConformanceTest {
         for (int status : List.of(429, 503)) {
             for (long delay : List.of(5L, 120L)) {
                 for (DateTimeFormatter formatter : List.of(
-                        DateTimeFormatter.RFC_1123_DATE_TIME,
+                        DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", Locale.US),
                         DateTimeFormatter.ofPattern("EEEE, dd-MMM-uu HH:mm:ss 'GMT'", Locale.US),
                         DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss uuuu", Locale.US))) {
                     assertRetryAfter(
@@ -133,6 +133,73 @@ class BaseMetadataCachingConformanceTest {
                 assertRetryAfter(status, delay, Long.toString(delay));
             }
         }
+    }
+
+    @Test
+    @DisplayName("row 2: a malformed HTTP-date on a 429 does not pace the next fetch")
+    void rejectsMalformedRetryAfterDates() {
+        for (String header : List.of(
+                "Tue, 10 Nov 2026 12:01 GMT",
+                "Tue, 10 Nov 2026 12:01:00 +0000",
+                "Tue, 10 Nov 2026 12:01:00 GMT junk",
+                "Tue Nov 32 12:01:00 2026")) {
+            AtomicInteger calls = new AtomicInteger();
+            AuthorizationServerMetadataCache cache = cache(
+                    request -> calls.incrementAndGet() == 1
+                            ? new TransportResponse(429, Map.of("Retry-After", List.of(header)), "")
+                            : ok(METADATA),
+                    Duration.ofHours(1),
+                    Duration.ofMinutes(1));
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+            assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+            assertThat(calls).hasValue(2);
+        }
+    }
+
+    @Test
+    @DisplayName("row 3: an invalidated transient failure does not pace the next fetch")
+    void invalidationDiscardsPendingFailure() {
+        for (int status : List.of(400, 503)) {
+            AtomicInteger calls = new AtomicInteger();
+            AtomicReference<AuthorizationServerMetadataCache> cacheRef = new AtomicReference<>();
+            AuthorizationServerMetadataCache cache = cache(
+                    request -> {
+                        if (calls.incrementAndGet() == 1) {
+                            cacheRef.get().invalidate(ISSUER);
+                            return new TransportResponse(status, Map.of("Retry-After", List.of("60")), "");
+                        }
+                        return ok(METADATA);
+                    },
+                    Duration.ofHours(1),
+                    Duration.ofMinutes(1));
+            cacheRef.set(cache);
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+            assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+            assertThat(calls).hasValue(2);
+        }
+    }
+
+    @Test
+    @DisplayName("row 3: retry pacing evicts the oldest issuer when its cache is full")
+    void boundsRetryCache() {
+        AtomicInteger calls = new AtomicInteger();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> {
+                    calls.incrementAndGet();
+                    return new TransportResponse(503, Map.of("Retry-After", List.of("60")), "");
+                },
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        for (int i = 0; i <= 128; i++) {
+            URI issuer = URI.create("https://issuer" + i + ".example.com");
+            assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(HttpStatusException.class);
+        }
+        assertThatThrownBy(() -> cache.get(URI.create("https://issuer128.example.com")))
+                .isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(129);
+        assertThatThrownBy(() -> cache.get(URI.create("https://issuer0.example.com")))
+                .isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(130);
     }
 
     private void assertRetryAfter(int status, long delay, String header) {

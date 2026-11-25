@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -37,12 +38,16 @@ public final class AuthorizationServerMetadataCache {
     private final Duration discoveryTtl;
     private final Duration negativeTtl;
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, MetadataRetry> retries = new ConcurrentHashMap<>();
+    private final MetadataRetry.Cache<String> retries = new MetadataRetry.Cache<>();
+    private final LongSupplier retryTicker;
+    private final Object writes = new Object();
+    private long generation;
     private final SingleFlight<String, AuthorizationServerMetadata> inFlight = new SingleFlight<>();
 
     private AuthorizationServerMetadataCache(Builder builder) {
         this.discovery = builder.discovery;
         this.clock = builder.clock;
+        this.retryTicker = MetadataRetry.ticker(clock);
         this.discoveryTtl = builder.discoveryTtl;
         // The default failure TTL shrinks to fit a short discovery TTL, so setting only
         // discoveryTtl (as TokenVerifier and the clients do) never fails; an explicit longer
@@ -149,37 +154,54 @@ public final class AuthorizationServerMetadataCache {
      * @param issuer the issuer to forget
      */
     public void invalidate(URI issuer) {
-        entries.remove(key(issuer));
-        retries.remove(key(issuer));
-        inFlight.forget(key(issuer));
+        synchronized (writes) {
+            generation++;
+            entries.remove(key(issuer));
+            retries.remove(key(issuer));
+            inFlight.forget(key(issuer));
+        }
     }
 
     /** Drops every cached outcome. */
     public void clear() {
-        entries.clear();
-        retries.clear();
-        inFlight.forgetAll();
+        synchronized (writes) {
+            generation++;
+            entries.clear();
+            retries.clear();
+            inFlight.forgetAll();
+        }
     }
 
     private AuthorizationServerMetadata fetch(String key, URI issuer) {
         // Another caller may have finished a fetch while this one waited to lead.
-        Entry entry = entries.get(key);
-        if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
-            return entry.unwrap();
+        long started;
+        synchronized (writes) {
+            started = generation;
+            Entry entry = entries.get(key);
+            if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
+                return entry.unwrap();
+            }
+            retries.check(key, retryTicker.getAsLong());
         }
-        MetadataRetry.check(retries.get(key), clock.instant());
         try {
             AuthorizationServerMetadata metadata = discovery.discover(issuer);
-            entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
-            retries.remove(key);
+            synchronized (writes) {
+                if (generation == started) {
+                    entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
+                    retries.remove(key);
+                }
+            }
             return metadata;
         } catch (KeycardException e) {
             boolean interrupted = e.getCause() instanceof InterruptedException;
-            if (!interrupted && !e.retryable() && !negativeTtl.isZero()) {
-                entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
-            }
-            if (!interrupted && e.retryable()) {
-                retries.compute(key, (ignored, previous) -> MetadataRetry.after(previous, clock.instant(), e));
+            synchronized (writes) {
+                if (!interrupted && generation == started) {
+                    if (e.retryable()) {
+                        retries.record(key, retryTicker.getAsLong(), clock.instant(), e);
+                    } else if (!negativeTtl.isZero()) {
+                        entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
+                    }
+                }
             }
             throw e;
         }

@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -57,7 +58,8 @@ public final class JwksKeyring implements VerificationKeyring {
     private final Clock clock;
 
     private final ConcurrentHashMap<URI, KeySet> keySets = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<URI, MetadataRetry> retries = new ConcurrentHashMap<>();
+    private final MetadataRetry.Cache<URI> retries = new MetadataRetry.Cache<>();
+    private final LongSupplier retryTicker;
     private final ConcurrentHashMap<String, URI> jwksUriByIssuer = new ConcurrentHashMap<>();
     private final Map<String, CachedKey> keys = new LinkedHashMap<>(16, 0.75f, true) {
         private static final long serialVersionUID = 1L;
@@ -77,6 +79,7 @@ public final class JwksKeyring implements VerificationKeyring {
         this.keyTtl = builder.keyTtl;
         this.refetchCooldown = builder.refetchCooldown;
         this.clock = builder.clock;
+        this.retryTicker = MetadataRetry.ticker(clock);
         this.metadata = builder.metadataCache != null
                 ? builder.metadataCache
                 : AuthorizationServerMetadataCache.builder()
@@ -218,13 +221,13 @@ public final class JwksKeyring implements VerificationKeyring {
         if (current != null && current != stale) {
             return current;
         }
-        MetadataRetry.check(retries.get(jwksUri), clock.instant());
+        retries.check(jwksUri, retryTicker.getAsLong());
         KeySet fetched;
         try {
             fetched = fetch(jwksUri);
         } catch (JwksException.Fetch e) {
             if (e.retryable() && generation.get() == started) {
-                retries.compute(jwksUri, (ignored, previous) -> MetadataRetry.after(previous, clock.instant(), e));
+                retries.record(jwksUri, retryTicker.getAsLong(), clock.instant(), e);
             }
             throw e;
         }
@@ -249,7 +252,7 @@ public final class JwksKeyring implements VerificationKeyring {
                 // than inheriting the cancellation.
                 throw e;
             }
-            throw new JwksException.Fetch("fetching the JWKS at " + jwksUri + " failed", e, true);
+            throw new JwksException.Fetch("fetching the JWKS at " + jwksUri + " failed", e, e.retryable());
         }
         if (!response.isSuccess()) {
             HttpStatusException status =
