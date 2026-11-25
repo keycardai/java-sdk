@@ -77,6 +77,20 @@ class AccessContextConformanceTest {
     }
 
     @Test
+    @DisplayName("row 5a: resourceError preserves the authorization-server reason")
+    void row5a() {
+        AccessContext context = new AccessContext();
+        var denial =
+                new OAuthErrorException("exchange failed", 400, "{}", "access_denied", "Denied", null, "policy_denied");
+        context.setResourceError(LEDGER, denial);
+
+        assertThat(context.resourceError(LEDGER)).containsSame(denial);
+        assertThat(context.resourceError(LEDGER).orElseThrow())
+                .isInstanceOfSatisfying(
+                        OAuthErrorException.class, e -> assertThat(e.reason()).isEqualTo("policy_denied"));
+    }
+
+    @Test
     @DisplayName("rows 7 to 10: hasErrors and hasError")
     void rows7To10() {
         AccessContext ok = new AccessContext(Map.of(LEDGER, TOKEN));

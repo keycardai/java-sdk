@@ -232,6 +232,34 @@ class ClientCredentialsConformanceTest {
     }
 
     @Test
+    @DisplayName("row 6a: preserves the denial reason separately from the description")
+    void row6a() {
+        assertDenialReason(
+                "{\"error\":\"access_denied\",\"error_description\":\"Denied\",\"reason\":\"custom_denial\"}",
+                "custom_denial");
+    }
+
+    @Test
+    @DisplayName("row 6b: leaves an omitted reason null without changing retryability")
+    void row6b() {
+        assertDenialReason("{\"error\":\"access_denied\",\"error_description\":\"Denied\"}", null);
+    }
+
+    private void assertDenialReason(String body, String reason) {
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            zone.respond("POST", StubZone.TOKEN_PATH, 400, body);
+
+            assertThatThrownBy(() -> client(zone).requestToken())
+                    .isInstanceOfSatisfying(OAuthErrorException.class, e -> {
+                        assertThat(e.error()).isEqualTo("access_denied");
+                        assertThat(e.reason()).isEqualTo(reason);
+                        assertThat(e.errorDescription()).isEqualTo("Denied");
+                        assertThat(e.retryable()).isFalse();
+                    });
+        }
+    }
+
+    @Test
     @DisplayName("row 6: a non-OAuth error body is an HTTP error")
     void row6NonOAuthBody() {
         try (StubZone zone = StubZone.start().serveDiscovery()) {

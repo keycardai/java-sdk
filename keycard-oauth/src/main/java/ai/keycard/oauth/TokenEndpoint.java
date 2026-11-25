@@ -104,6 +104,7 @@ final class TokenEndpoint {
                     code,
                     description,
                     stringOrNull(document.get("error_uri")),
+                    stringOrNull(document.get("reason")),
                     !OAuthErrorCodes.isPermanent(code) && !locallyPermanent.contains(code));
         }
         return new HttpStatusException(

@@ -16,6 +16,8 @@ public class OAuthErrorException extends HttpStatusException {
     private final @Nullable String errorDescription;
     /** The OAuth {@code error_uri}, or {@code null}. */
     private final @Nullable String errorUri;
+    /** The authorization server's {@code reason}, or {@code null}. */
+    private final @Nullable String reason;
 
     /**
      * Creates the exception, classifying it from the error code.
@@ -34,10 +36,29 @@ public class OAuthErrorException extends HttpStatusException {
             String error,
             @Nullable String errorDescription,
             @Nullable String errorUri) {
-        super(message, status, body, !OAuthErrorCodes.isPermanent(error));
-        this.error = error;
-        this.errorDescription = errorDescription;
-        this.errorUri = errorUri;
+        this(message, status, body, error, errorDescription, errorUri, null);
+    }
+
+    /**
+     * Creates the exception with an optional authorization-server reason.
+     *
+     * @param message what failed
+     * @param status the HTTP status code
+     * @param body the response body
+     * @param error the OAuth {@code error} code, such as {@code access_denied}
+     * @param errorDescription the {@code error_description}, or {@code null}
+     * @param errorUri the {@code error_uri}, or {@code null}
+     * @param reason the server's {@code reason}, or {@code null}
+     */
+    public OAuthErrorException(
+            String message,
+            int status,
+            String body,
+            String error,
+            @Nullable String errorDescription,
+            @Nullable String errorUri,
+            @Nullable String reason) {
+        this(message, status, body, error, errorDescription, errorUri, reason, !OAuthErrorCodes.isPermanent(error));
     }
 
     /** Creates the exception with a classification an operation overrides locally. */
@@ -49,10 +70,24 @@ public class OAuthErrorException extends HttpStatusException {
             @Nullable String errorDescription,
             @Nullable String errorUri,
             boolean retryable) {
+        this(message, status, body, error, errorDescription, errorUri, null, retryable);
+    }
+
+    /** Creates the exception with a reason and an operation-specific classification. */
+    OAuthErrorException(
+            String message,
+            int status,
+            String body,
+            String error,
+            @Nullable String errorDescription,
+            @Nullable String errorUri,
+            @Nullable String reason,
+            boolean retryable) {
         super(message, status, body, retryable);
         this.error = error;
         this.errorDescription = errorDescription;
         this.errorUri = errorUri;
+        this.reason = reason;
     }
 
     /**
@@ -80,5 +115,14 @@ public class OAuthErrorException extends HttpStatusException {
      */
     public @Nullable String errorUri() {
         return errorUri;
+    }
+
+    /**
+     * The authorization server's machine-readable reason.
+     *
+     * @return the reason, or {@code null} when the server sent none
+     */
+    public @Nullable String reason() {
+        return reason;
     }
 }
