@@ -43,8 +43,6 @@ record MetadataRetry(KeycardException failure, long until, long nextMillis) {
             return previous;
         }
         Throwable cause = failure instanceof JwksException.Fetch ? failure.getCause() : failure;
-        long next = previous == null ? 1_000 : previous.nextMillis;
-        // An oversized response keeps its status and Retry-After, so it is paced like any other.
         int status = 0;
         String retryAfterHeader = null;
         if (cause instanceof HttpStatusException http) {
@@ -54,6 +52,10 @@ record MetadataRetry(KeycardException failure, long until, long nextMillis) {
             status = oversized.status();
             retryAfterHeader = oversized.retryAfter();
         }
+        if (status >= 200 && status < 300) {
+            return previous;
+        }
+        long next = previous == null ? 1_000 : previous.nextMillis;
         if (status == 429 || status == 503) {
             Duration delay = retryAfter(wallTime, retryAfterHeader);
             if (delay != null) {

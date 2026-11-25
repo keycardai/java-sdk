@@ -3,7 +3,11 @@ package ai.keycard.oauth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.TestClock;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -22,6 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Conformance tests for response body size limits (base.md rows 1, 1a, 1b, 1c and device-authorization.md row 36). */
 class ResponseBodySizeLimitTest {
@@ -164,8 +170,7 @@ class ResponseBodySizeLimitTest {
                 assertThat(calls.get()).isEqualTo(1);
 
                 failFirst.set(false);
-                if (tc.status() == 200 || tc.status() == 503) {
-                    // A retryable oversized response paces the next fetch with the base backoff.
+                if (tc.status() == 503) {
                     assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(ResponseBodyTooLargeException.class);
                     assertThat(calls.get()).isEqualTo(1);
                     clock.advance(Duration.ofMillis(1200));
@@ -211,7 +216,6 @@ class ResponseBodySizeLimitTest {
                             e -> assertThat(((KeycardException) e).retryable()).isTrue());
 
             failDiscovery.set(false);
-            clock.advance(Duration.ofMillis(1200));
             assertThatThrownBy(() -> keyring.resolve(issuer, "k1"))
                     .isInstanceOf(JwksException.Fetch.class)
                     .satisfies(
@@ -462,6 +466,31 @@ class ResponseBodySizeLimitTest {
             assertThat(response.body()).isEmpty();
         } finally {
             server.stop(0);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {StubZone.DISCOVERY_PATH, StubZone.JWKS_PATH})
+    @DisplayName("row 1a: an oversized 200 from discovery or JWKS starts no retry delay")
+    void row1a_oversized200StartsNoDelay(String path) throws Exception {
+        RSAKey key = new RSAKeyGenerator(2048).keyID("k1").generate();
+        String jwks = new JWKSet(key.toPublicJWK()).toString();
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            zone.respond("GET", StubZone.JWKS_PATH, 200, jwks);
+            zone.respond("GET", path, 200, new String(makeTokenJson(1), StandardCharsets.UTF_8));
+            JwksKeyring keyring = JwksKeyring.builder().clock(TestClock.start()).build();
+            assertThatThrownBy(() -> keyring.resolve(zone.issuer(), "k1"))
+                    .isInstanceOf(
+                            path.equals(StubZone.DISCOVERY_PATH)
+                                    ? JwksException.Discovery.class
+                                    : JwksException.Fetch.class)
+                    .hasCauseInstanceOf(ResponseBodyTooLargeException.class);
+            assertThat(zone.requests(path)).hasSize(1);
+
+            zone.serveDiscovery();
+            zone.respond("GET", StubZone.JWKS_PATH, 200, jwks);
+            assertThat(keyring.resolve(zone.issuer(), "k1")).isEqualTo(key.toRSAPublicKey());
+            assertThat(zone.requests(path)).hasSize(2);
         }
     }
 
