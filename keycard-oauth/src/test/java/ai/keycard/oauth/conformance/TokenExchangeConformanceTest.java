@@ -3,8 +3,11 @@ package ai.keycard.oauth.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.ClientAuthentication;
+import ai.keycard.oauth.ClientAuthenticator;
 import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.KeycardHttpTransport;
@@ -13,6 +16,7 @@ import ai.keycard.oauth.OAuthErrorCodes;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.TokenExchangeClient;
+import ai.keycard.oauth.TokenExchangeContext;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.TokenTypes;
@@ -315,6 +319,35 @@ class TokenExchangeConformanceTest {
                 form.containsEntry("client_id", List.of(clientId));
             }
             assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    void customBasicAuthenticatorRejectsRequestClientIdBeforePosting() {
+        class CustomCredential implements Credential, ClientAuthenticator {
+            @Override
+            public TokenExchangeRequest prepareTokenExchangeRequest(TokenExchangeContext context) {
+                return TokenExchangeRequest.builder(context.subjectToken()).build();
+            }
+
+            @Override
+            public ClientAuthentication authenticate(URI issuer, URI endpoint) {
+                return ClientAuthentication.header("authorization", "basic Z3c6Z3ctc2VjcmV0");
+            }
+        }
+
+        try (StubZone zone = zone()) {
+            TokenExchangeClient client = TokenExchangeClient.builder(zone.issuer())
+                    .credential(new CustomCredential())
+                    .build();
+            TokenExchangeRequest request = TokenExchangeRequest.builder("subject")
+                    .clientId("request-id")
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeToken(request))
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("HTTP Basic");
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
         }
     }
 

@@ -33,6 +33,7 @@ import org.jspecify.annotations.Nullable;
 public final class TokenExchangeClient {
 
     private static final String SUBSTITUTE_USER_HEADER = encodeJson(orderedMap("typ", "vnd.kc.su+jwt", "alg", "none"));
+    private static final String BASIC_CLIENT_ID_ERROR = "token exchange clientId cannot be sent with HTTP Basic";
 
     private final URI issuer;
     private final @Nullable Credential credential;
@@ -139,7 +140,7 @@ public final class TokenExchangeClient {
 
     private TokenResponse exchangeToken(TokenExchangeRequest request, boolean prepareAssertion) {
         if (request.clientAssertion() == null && request.clientId() != null && credential instanceof ClientSecret) {
-            throw new ConfigurationException("token exchange clientId cannot be sent with HTTP Basic");
+            throw new ConfigurationException(BASIC_CLIENT_ID_ERROR);
         }
         TokenExchangeRequest withActor = request;
         if (actor != null && request.actorToken() == null) {
@@ -234,6 +235,12 @@ public final class TokenExchangeClient {
                 }
                 auth = authenticator.authenticate(issuer, endpoint);
             }
+        }
+        if (request.clientId() != null
+                && auth.headers().entrySet().stream()
+                        .anyMatch(header -> header.getKey().equalsIgnoreCase("Authorization")
+                                && header.getValue().regionMatches(true, 0, "Basic ", 0, 6))) {
+            throw new ConfigurationException(BASIC_CLIENT_ID_ERROR);
         }
         return TokenEndpoint.post(transport, endpoint, request.formParameters(), auth, fetchTimeout, "token exchange");
     }
