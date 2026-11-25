@@ -3,8 +3,11 @@ package ai.keycard.oauth.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.ClientAuthentication;
+import ai.keycard.oauth.ClientAuthenticator;
 import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.KeycardHttpTransport;
@@ -13,6 +16,7 @@ import ai.keycard.oauth.OAuthErrorCodes;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.TokenExchangeClient;
+import ai.keycard.oauth.TokenExchangeContext;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.TokenTypes;
@@ -36,8 +40,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
-/** token-exchange.md (spec-version 4), Unit Tests table, including the retryability rows. */
+/** token-exchange.md, Unit Tests table, including the retryability rows. */
 class TokenExchangeConformanceTest {
 
     private static final URI RESOURCE = URI.create("https://api.example.com");
@@ -260,6 +267,87 @@ class TokenExchangeConformanceTest {
             List<StubZone.RecordedRequest> posts = zone.requests(StubZone.TOKEN_PATH);
             assertThat(posts.get(0).formParams()).containsEntry("client_id", List.of("engine"));
             assertThat(posts.get(1).formParams()).doesNotContainKey("client_id");
+        }
+    }
+
+    @Test
+    @DisplayName("row 4f: a request client_id with Basic is rejected before discovery or actor lookup")
+    void row4f() {
+        try (StubZone zone = zone()) {
+            AtomicInteger actorCalls = new AtomicInteger();
+            TokenExchangeClient client = TokenExchangeClient.builder(zone.issuer())
+                    .credential(ClientSecret.of("gw", "gw-secret"))
+                    .actor(() -> {
+                        actorCalls.incrementAndGet();
+                        return "actor.jwt";
+                    })
+                    .build();
+            TokenExchangeRequest request = TokenExchangeRequest.builder("subject")
+                    .clientId("request-id")
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeToken(request))
+                    .isInstanceOfSatisfying(
+                            ConfigurationException.class,
+                            e -> assertThat(e.retryable()).isFalse())
+                    .hasMessageContaining("HTTP Basic");
+            assertThat(actorCalls).hasValue(0);
+            assertThat(zone.requests()).isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "request-id")
+    @DisplayName("row 4g: an explicit assertion suppresses Basic with or without a request client_id")
+    void row4g(String clientId) {
+        try (StubZone zone = zone()) {
+            client(zone)
+                    .exchangeToken(TokenExchangeRequest.builder("subject")
+                            .clientAssertion("assertion.jwt", TokenTypes.JWT_BEARER_ASSERTION)
+                            .clientId(clientId)
+                            .build());
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            var form = assertThat(request.formParams())
+                    .containsEntry("client_assertion", List.of("assertion.jwt"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION));
+            if (clientId == null) {
+                form.doesNotContainKey("client_id");
+            } else {
+                form.containsEntry("client_id", List.of(clientId));
+            }
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    void customBasicAuthenticatorRejectsRequestClientIdBeforePosting() {
+        class CustomCredential implements Credential, ClientAuthenticator {
+            @Override
+            public TokenExchangeRequest prepareTokenExchangeRequest(TokenExchangeContext context) {
+                return TokenExchangeRequest.builder(context.subjectToken()).build();
+            }
+
+            @Override
+            public ClientAuthentication authenticate(URI issuer, URI endpoint) {
+                return ClientAuthentication.header("authorization", "basic Z3c6Z3ctc2VjcmV0");
+            }
+        }
+
+        try (StubZone zone = zone()) {
+            TokenExchangeClient client = TokenExchangeClient.builder(zone.issuer())
+                    .credential(new CustomCredential())
+                    .build();
+            TokenExchangeRequest request = TokenExchangeRequest.builder("subject")
+                    .clientId("request-id")
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeToken(request))
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("HTTP Basic");
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
         }
     }
 
