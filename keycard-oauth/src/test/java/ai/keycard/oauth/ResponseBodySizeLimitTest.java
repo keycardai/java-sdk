@@ -364,4 +364,93 @@ class ResponseBodySizeLimitTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("row 36: pollUntilDone returns invalid_response directly for an oversized 200 or 400")
+    void row36_pollUntilDoneOversized200And400() throws Exception {
+        for (int status : List.of(200, 400)) {
+            AtomicInteger pollCount = new AtomicInteger();
+            HttpServer server = startServer();
+            try {
+                URI issuer = baseUri(server);
+                server.createContext("/token", ex -> {
+                    pollCount.incrementAndGet();
+                    send(ex, status, makeTokenJson(512), null);
+                });
+                AtomicReference<Instant> now = new AtomicReference<>(Instant.ofEpochSecond(1_000_000));
+                Clock clock = new Clock() {
+                    @Override
+                    public java.time.ZoneId getZone() {
+                        return ZoneOffset.UTC;
+                    }
+
+                    @Override
+                    public Clock withZone(java.time.ZoneId zone) {
+                        return this;
+                    }
+
+                    @Override
+                    public Instant instant() {
+                        return now.get();
+                    }
+                };
+                AuthorizationServerMetadata md = new AuthorizationServerMetadata(
+                        issuer,
+                        URI.create(issuer + "/token"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        URI.create(issuer + "/device"),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        java.util.Map.of());
+                DeviceAuthorizationClient client = DeviceAuthorizationClient.builder(md)
+                        .clientId("cid")
+                        .clock(clock)
+                        .sleeper(d -> now.set(now.get().plus(d)))
+                        .build();
+                DeviceAuthorization auth = new DeviceAuthorization(
+                        "dev-1",
+                        "ABCD-1234",
+                        URI.create(issuer + "/verify"),
+                        null,
+                        Duration.ofSeconds(600),
+                        Duration.ofSeconds(5),
+                        now.get().plusSeconds(600));
+
+                assertThatThrownBy(() -> client.pollUntilDone(auth))
+                        .isExactlyInstanceOf(ResponseBodyTooLargeException.class)
+                        .satisfies(err -> {
+                            ResponseBodyTooLargeException e = (ResponseBodyTooLargeException) err;
+                            assertThat(e.code()).isEqualTo(OAuthProtocolException.INVALID_RESPONSE);
+                            assertThat(e.status()).isEqualTo(status);
+                        });
+                assertThat(pollCount).hasValue(1);
+            } finally {
+                server.stop(0);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("an empty gzip-encoded 204 body reads as empty instead of failing")
+    void emptyGzipBody() throws Exception {
+        HttpServer server = startServer();
+        try {
+            server.createContext("/empty", ex -> {
+                ex.getResponseHeaders().set("Content-Encoding", "gzip");
+                ex.sendResponseHeaders(204, -1);
+                ex.close();
+            });
+            TransportResponse response = new JdkHttpTransport(java.net.http.HttpClient.newHttpClient())
+                    .send(TransportRequest.get(URI.create(baseUri(server) + "/empty"), Duration.ofSeconds(5)));
+            assertThat(response.status()).isEqualTo(204);
+            assertThat(response.body()).isEmpty();
+        } finally {
+            server.stop(0);
+        }
+    }
 }

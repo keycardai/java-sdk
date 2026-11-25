@@ -3,6 +3,7 @@ package ai.keycard.oauth;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PushbackInputStream;
 import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -50,20 +51,25 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         HttpRequest httpRequest = toHttpRequest(request);
         String host = request.uri().getHost();
         AtomicReference<InputStream> bodyStream = new AtomicReference<>();
-        CompletableFuture<TransportResponse> exchange = client.sendAsync(
-                        httpRequest, HttpResponse.BodyHandlers.ofInputStream())
-                .thenApplyAsync(response -> readResponse(response, bodyStream, limit));
+        // Cancelling the read stage alone leaves the JDK exchange running, so the send future is
+        // kept and cancelled too on timeout or interrupt.
+        CompletableFuture<HttpResponse<InputStream>> sent =
+                client.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+        CompletableFuture<TransportResponse> exchange =
+                sent.thenApplyAsync(response -> readResponse(response, bodyStream, limit));
         try {
             return exchange.get(request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
             closeQuietly(bodyStream.get());
             exchange.cancel(true);
+            sent.cancel(true);
             throw new NetworkException(
                     "request to " + host + " timed out after " + request.timeout(),
                     new HttpTimeoutException("request timed out after " + request.timeout()));
         } catch (InterruptedException e) {
             closeQuietly(bodyStream.get());
             exchange.cancel(true);
+            sent.cancel(true);
             Thread.currentThread().interrupt();
             throw new NetworkException("request to " + host + " was interrupted", e);
         } catch (ExecutionException e) {
@@ -108,10 +114,21 @@ final class JdkHttpTransport implements KeycardHttpTransport {
 
     private static InputStream wrapEncoding(InputStream raw, String encoding) throws IOException {
         return switch (encoding) {
-            case "gzip", "x-gzip" -> new GZIPInputStream(raw);
+            case "gzip", "x-gzip" -> gunzip(raw);
             case "deflate" -> new InflaterInputStream(raw);
             default -> raw;
         };
+    }
+
+    /** An empty body (such as on a 204 or 304) stays empty instead of failing the gzip header read. */
+    private static InputStream gunzip(InputStream raw) throws IOException {
+        PushbackInputStream in = new PushbackInputStream(raw, 1);
+        int first = in.read();
+        if (first == -1) {
+            return in;
+        }
+        in.unread(first);
+        return new GZIPInputStream(in);
     }
 
     private static byte[] readBytes(InputStream in, int status, int limit) throws IOException {
