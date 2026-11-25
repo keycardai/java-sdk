@@ -18,6 +18,9 @@ public interface KeycardHttpTransport {
     /** The default bound on each request to the authorization server: 10 seconds. */
     Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
+    /** The maximum number of decoded bytes read from any authorization-server HTTP response: 1 MiB. */
+    int MAX_RESPONSE_BODY_BYTES = 1_048_576;
+
     /**
      * Sends one request.
      *
