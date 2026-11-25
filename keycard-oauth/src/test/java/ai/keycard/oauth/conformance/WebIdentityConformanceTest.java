@@ -19,13 +19,16 @@ import com.nimbusds.jose.JWSObject;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jose.jwk.RSAKey;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPairGenerator;
+import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -218,6 +221,36 @@ class WebIdentityConformanceTest {
     }
 
     @Test
+    @DisplayName("PKCS#1 extraction round-trips 200 generated RSA keys")
+    void pkcs1GeneratedKeys() throws Exception {
+        SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+        random.setSeed(new byte[] {0});
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048, random);
+        Path file = dir.resolve("generated.pem");
+
+        for (int i = 0; i < 200; i++) {
+            RSAPrivateCrtKey key =
+                    (RSAPrivateCrtKey) generator.generateKeyPair().getPrivate();
+            String body = Base64.getEncoder().encodeToString(pkcs1(key.getEncoded()));
+            Files.writeString(file, "-----BEGIN RSA PRIVATE KEY-----\n" + body + "\n-----END RSA PRIVATE KEY-----\n");
+            RSAKey loaded = (RSAKey)
+                    identity("generated", "my-client").publicJwks().getKeys().get(0);
+            assertThat(loaded.getModulus().decodeToBigInteger()).as("key %s", i).isEqualTo(key.getModulus());
+        }
+    }
+
+    @Test
+    @DisplayName("PKCS#8 extraction treats a nested OCTET STRING marker as key data")
+    void pkcs1IgnoresMarkerInKeyData() {
+        String payload = "00".repeat(122) + "0482ffff0000";
+        HexFormat hex = HexFormat.of();
+        byte[] pkcs8 = hex.parseHex("308195020100300d06092a864886f70d0101010500048180" + payload);
+
+        assertThat(pkcs1(pkcs8)).isEqualTo(hex.parseHex(payload));
+    }
+
+    @Test
     @DisplayName("device row 22: one flow signs a fresh assertion per request, audienced to each endpoint")
     void deviceFlow() throws Exception {
         try (StubZone zone = StubZone.start().serveDiscovery()) {
@@ -314,18 +347,38 @@ class WebIdentityConformanceTest {
         return new HashMap<>(jws.getPayload().toJSONObject());
     }
 
-    /** Pulls the PKCS#1 RSAPrivateKey out of a PKCS#8 encoding: the last OCTET STRING. */
+    /** Pulls the privateKey OCTET STRING out of PKCS#8 PrivateKeyInfo. */
     private static byte[] pkcs1(byte[] pkcs8) {
-        int i = pkcs8.length;
-        for (int p = 0; p < pkcs8.length - 4; p++) {
-            if (pkcs8[p] == 0x04 && (pkcs8[p + 1] & 0xff) == 0x82) {
-                i = p;
+        ByteBuffer sequence = readDerValue(ByteBuffer.wrap(pkcs8), 0x30);
+        readDerValue(sequence, 0x02); // version
+        readDerValue(sequence, 0x30); // AlgorithmIdentifier
+        ByteBuffer privateKey = readDerValue(sequence, 0x04);
+        byte[] out = new byte[privateKey.remaining()];
+        privateKey.get(out);
+        return out;
+    }
+
+    private static ByteBuffer readDerValue(ByteBuffer der, int tag) {
+        if (der.remaining() < 2 || Byte.toUnsignedInt(der.get()) != tag) {
+            throw new IllegalArgumentException("expected DER tag " + tag);
+        }
+        int length = Byte.toUnsignedInt(der.get());
+        if (length >= 0x80) {
+            int lengthBytes = length & 0x7f;
+            if (lengthBytes == 0 || lengthBytes > Integer.BYTES || lengthBytes > der.remaining()) {
+                throw new IllegalArgumentException("invalid DER length field");
+            }
+            length = 0;
+            for (int i = 0; i < lengthBytes; i++) {
+                length = (length << 8) | Byte.toUnsignedInt(der.get());
             }
         }
-        int length = ((pkcs8[i + 2] & 0xff) << 8) | (pkcs8[i + 3] & 0xff);
-        byte[] out = new byte[length];
-        System.arraycopy(pkcs8, i + 4, out, 0, length);
-        return out;
+        if (length < 0 || length > der.remaining()) {
+            throw new IllegalArgumentException("DER value exceeds its container");
+        }
+        ByteBuffer value = der.slice(der.position(), length);
+        der.position(der.position() + length);
+        return value;
     }
 
     /** Counts loads, to show nothing was signed. */
