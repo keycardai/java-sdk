@@ -111,6 +111,11 @@ public final class JwksKeyring implements VerificationKeyring {
         return new Builder();
     }
 
+    @Override
+    public String toString() {
+        return "JwksKeyring[issuers=" + jwksUriByIssuer.keySet() + "]";
+    }
+
     /**
      * Resolves the key for {@code (issuer, kid)}.
      *

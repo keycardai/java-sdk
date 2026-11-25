@@ -114,7 +114,7 @@ public final class WorkloadIdentity implements Credential, ClientAuthenticator {
 
     @Override
     public String toString() {
-        return "WorkloadIdentity[source=" + source + ", clientId=" + clientId + "]";
+        return "WorkloadIdentity[source=" + source.getClass().getName() + ", clientId=" + clientId + "]";
     }
 
     private String fetch() {

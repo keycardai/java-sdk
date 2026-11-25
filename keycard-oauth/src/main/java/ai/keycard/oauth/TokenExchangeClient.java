@@ -32,6 +32,14 @@ import org.jspecify.annotations.Nullable;
  */
 public final class TokenExchangeClient {
 
+    @Override
+    public String toString() {
+        return "TokenExchangeClient[issuer=" + issuer
+                + ", credential="
+                + (credential == null ? "none" : credential.getClass().getName())
+                + ", actor=" + (actor == null ? "none" : actor.getClass().getName()) + "]";
+    }
+
     private static final String SUBSTITUTE_USER_HEADER = encodeJson(orderedMap("typ", "vnd.kc.su+jwt", "alg", "none"));
     private static final String BASIC_CLIENT_ID_ERROR = "token exchange clientId cannot be sent with HTTP Basic";
 

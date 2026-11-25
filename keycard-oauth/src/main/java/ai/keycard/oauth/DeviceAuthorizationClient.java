@@ -35,6 +35,14 @@ import org.jspecify.annotations.Nullable;
  */
 public final class DeviceAuthorizationClient {
 
+    @Override
+    public String toString() {
+        return "DeviceAuthorizationClient[issuer=" + issuer
+                + ", clientId=" + clientId
+                + ", credential="
+                + (credential == null ? "none" : credential.getClass().getName()) + "]";
+    }
+
     /** The device code grant type (RFC 8628 §3.4). */
     public static final String GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 

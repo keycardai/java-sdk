@@ -27,9 +27,11 @@ import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.RecordedRequest;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import ai.keycard.oauth.testing.TestClock;
+import com.nimbusds.jose.util.JSONObjectUtils;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -452,6 +454,39 @@ class DeviceAuthorizationConformanceTest {
                     .containsExactly("persisted-code");
             assertThat(persisted.toString()).doesNotContain("persisted-code");
         }
+    }
+
+    @Test
+    @DisplayName("row 38: device code is absent from display but present in persisted JSON")
+    void row38() throws Exception {
+        DeviceAuthorization authorization = new DeviceAuthorization(
+                "secret-device-code",
+                "public-user-code",
+                URI.create("https://zone.example/device"),
+                URI.create("https://zone.example/device?user_code=public-user-code"),
+                seconds(600),
+                seconds(5),
+                Instant.EPOCH.plusSeconds(600));
+
+        assertThat(authorization.toString())
+                .contains(
+                        "userCode=public-user-code",
+                        "verificationUri=https://zone.example/device",
+                        "verificationUriComplete=https://zone.example/device?user_code=public-user-code",
+                        "expiresIn=PT10M",
+                        "interval=PT5S",
+                        "expiresAt=1970-01-01T00:10:00Z")
+                .doesNotContain("secret-device-code");
+        String json = JSONObjectUtils.toJSONString(Map.of(
+                "device_code", authorization.deviceCode(),
+                "user_code", authorization.userCode(),
+                "verification_uri", authorization.verificationUri().toString(),
+                "verification_uri_complete",
+                        authorization.verificationUriComplete().toString(),
+                "expires_in", authorization.expiresIn().toSeconds(),
+                "interval", authorization.interval().toSeconds(),
+                "expires_at", authorization.expiresAt().toString()));
+        assertThat(JSONObjectUtils.parse(json)).containsEntry("device_code", "secret-device-code");
     }
 
     @Test

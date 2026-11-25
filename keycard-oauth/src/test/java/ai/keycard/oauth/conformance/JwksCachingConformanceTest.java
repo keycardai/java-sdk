@@ -49,6 +49,15 @@ class JwksCachingConformanceTest {
     }
 
     @Test
+    void keyringPrintsOnlyIssuerIdentifiers() {
+        try (StubZone zone = zone(k1)) {
+            JwksKeyring keyring = keyring(zone);
+            keyring.resolve(zone.issuer(), "k1");
+            assertThat(keyring.toString()).isEqualTo("JwksKeyring[issuers=[" + zone.issuer() + "]]");
+        }
+    }
+
+    @Test
     @DisplayName("row 1: a cold lookup discovers jwks_uri, fetches the JWKS and returns the matching key")
     void row1() throws Exception {
         try (StubZone zone = zone(k1, k2)) {

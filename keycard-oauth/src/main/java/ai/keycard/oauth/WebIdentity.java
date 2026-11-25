@@ -293,7 +293,8 @@ public final class WebIdentity implements Credential, ClientAuthenticator {
      */
     @Override
     public String toString() {
-        return "WebIdentity[keyId=" + keyId + ", clientId=" + clientId + ", storage=" + storage + "]";
+        return "WebIdentity[keyId=" + keyId + ", clientId=" + clientId + ", storage="
+                + storage.getClass().getName() + "]";
     }
 
     /** Configures a {@link WebIdentity}. */

@@ -29,6 +29,12 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ClientCredentialsClient {
 
+    @Override
+    public String toString() {
+        return "ClientCredentialsClient[issuer=" + issuer + ", credential="
+                + (credential == null ? "none" : credential.getClass().getName()) + "]";
+    }
+
     private final URI issuer;
     private final @Nullable ClientAuthenticator credential;
     private final KeycardHttpTransport transport;

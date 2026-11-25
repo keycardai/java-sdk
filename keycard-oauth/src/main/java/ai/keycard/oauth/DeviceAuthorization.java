@@ -71,7 +71,7 @@ public record DeviceAuthorization(
     @Override
     public String toString() {
         return "DeviceAuthorization[userCode=" + userCode + ", verificationUri=" + verificationUri
-                + ", verificationUriComplete=" + verificationUriComplete + ", interval=" + interval
-                + ", expiresAt=" + expiresAt + "]";
+                + ", verificationUriComplete=" + verificationUriComplete + ", expiresIn=" + expiresIn
+                + ", interval=" + interval + ", expiresAt=" + expiresAt + "]";
     }
 }

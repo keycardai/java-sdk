@@ -49,6 +49,14 @@ import org.jspecify.annotations.Nullable;
  */
 public final class AuthorizationCodeClient {
 
+    @Override
+    public String toString() {
+        return "AuthorizationCodeClient[issuer=" + issuer
+                + ", clientId=" + clientId
+                + ", credential="
+                + (credential == null ? "none" : credential.getClass().getName()) + "]";
+    }
+
     /** Opens the authorize URL for the user. */
     @FunctionalInterface
     public interface BrowserOpener {
