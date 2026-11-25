@@ -253,6 +253,11 @@ public final class DeviceAuthorizationClient {
                     case "slow_down" -> current = current.plus(SLOW_DOWN_INCREMENT);
                     default -> throw e;
                 }
+            } catch (ResponseBodyTooLargeException e) {
+                if (isServerSide(e.status())) {
+                    throw stopped(e, current);
+                }
+                throw e;
             } catch (HttpStatusException e) {
                 if (isServerSide(e.status())) {
                     throw stopped(e, current);

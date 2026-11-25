@@ -227,6 +227,9 @@ public final class JwksKeyring implements VerificationKeyring {
         try {
             response = transport.send(
                     TransportRequest.get(jwksUri, fetchTimeout).withHeader("Accept", "application/json"));
+        } catch (ResponseBodyTooLargeException e) {
+            throw new JwksException.Fetch(
+                    "the JWKS at " + jwksUri + " exceeded the response size limit", e, e.retryable());
         } catch (NetworkException e) {
             if (e.getCause() instanceof InterruptedException) {
                 // The caller was cancelled; rethrow as is so waiting callers fetch again rather

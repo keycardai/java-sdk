@@ -45,7 +45,19 @@ public class OAuthProtocolException extends KeycardException {
      * @param cause the parse failure, or {@code null}
      */
     public OAuthProtocolException(String message, String code, @Nullable Throwable cause) {
-        super(message, cause, INVALID_RESPONSE.equals(code));
+        this(message, code, cause, INVALID_RESPONSE.equals(code));
+    }
+
+    /**
+     * Creates the exception with an explicit retryability classification.
+     *
+     * @param message what was wrong with the response
+     * @param code the discriminator, such as {@link #INVALID_RESPONSE}
+     * @param cause the underlying failure, or {@code null}
+     * @param retryable whether repeating the request unchanged could succeed
+     */
+    protected OAuthProtocolException(String message, String code, @Nullable Throwable cause, boolean retryable) {
+        super(message, cause, retryable);
         this.code = code;
     }
 

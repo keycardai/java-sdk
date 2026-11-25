@@ -18,6 +18,9 @@ public interface KeycardHttpTransport {
     /** The default bound on each request to the authorization server: 10 seconds. */
     Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
+    /** The maximum number of decoded bytes read from any authorization-server HTTP response: 1 MiB. */
+    int MAX_RESPONSE_BODY_BYTES = 1_048_576;
+
     /**
      * Sends one request.
      *
@@ -27,6 +30,20 @@ public interface KeycardHttpTransport {
      *     thread is interrupted (the interrupt flag stays set)
      */
     TransportResponse send(TransportRequest request);
+
+    /**
+     * Sends one request without enforcing {@link #MAX_RESPONSE_BODY_BYTES}. Used for non-OAuth
+     * application payloads (such as A2A agent invocation replies) that share a transport with
+     * authorization-server calls.
+     *
+     * @param request the request
+     * @return the response, whatever its status
+     * @throws NetworkException on DNS, TLS, connect or timeout failures, or when the calling
+     *     thread is interrupted (the interrupt flag stays set)
+     */
+    default TransportResponse sendUnbounded(TransportRequest request) {
+        return send(request);
+    }
 
     /**
      * The default transport: a JDK {@link HttpClient} that follows no redirects and connects
