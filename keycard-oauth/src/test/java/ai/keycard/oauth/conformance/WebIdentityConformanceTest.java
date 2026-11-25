@@ -224,7 +224,7 @@ class WebIdentityConformanceTest {
     @DisplayName("PKCS#1 extraction round-trips 200 generated RSA keys")
     void pkcs1GeneratedKeys() throws Exception {
         SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
-        random.setSeed(0);
+        random.setSeed(new byte[] {0});
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048, random);
         Path file = dir.resolve("generated.pem");
