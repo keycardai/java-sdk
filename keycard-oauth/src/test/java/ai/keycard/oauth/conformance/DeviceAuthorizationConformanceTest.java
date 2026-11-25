@@ -291,6 +291,48 @@ class DeviceAuthorizationConformanceTest {
     }
 
     @Test
+    @DisplayName("row 11a: a wait that runs past expires_at ends with expired_token, without authenticating or polling")
+    void row11a() {
+        try (StubZone zone = StubZone.start().serveDiscovery()) {
+            zone.respond(
+                    "POST",
+                    StubZone.DEVICE_AUTHORIZATION_PATH,
+                    200,
+                    "{\"device_code\":\"dc\",\"user_code\":\"U\",\"verification_uri\":\"https://zone.example/device\","
+                            + "\"expires_in\":5,\"interval\":5}");
+            URI tokenEndpoint = zone.url(StubZone.TOKEN_PATH);
+            List<URI> authenticated = new ArrayList<>();
+            RecordingAuthenticator credential = new RecordingAuthenticator() {
+                @Override
+                public ClientAuthentication authenticate(URI issuer, URI endpoint) {
+                    authenticated.add(endpoint);
+                    return super.authenticate(issuer, endpoint);
+                }
+            };
+            TestClock clock = TestClock.start();
+            List<Duration> waits = new ArrayList<>();
+            DeviceAuthorizationClient client = DeviceAuthorizationClient.builder(zone.issuer())
+                    .credential(credential)
+                    .clock(clock)
+                    .sleeper(duration -> {
+                        waits.add(duration);
+                        clock.advance(duration.plusSeconds(1));
+                    })
+                    .build();
+            DeviceAuthorization authorization = client.requestDeviceAuthorization(List.of(), List.of());
+
+            assertThatThrownBy(() -> client.pollUntilDone(authorization))
+                    .isInstanceOfSatisfying(OAuthErrorException.class, e -> {
+                        assertThat(e.error()).isEqualTo("expired_token");
+                        assertThat(e.retryable()).isFalse();
+                    });
+            assertThat(waits).containsExactly(seconds(5));
+            assertThat(authenticated).doesNotContain(tokenEndpoint);
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
+        }
+    }
+
+    @Test
     @DisplayName("row 12: expired_token or invalid_grant from the server stops the loop, not retryable")
     void row12() {
         for (String code : List.of("expired_token", "invalid_grant")) {

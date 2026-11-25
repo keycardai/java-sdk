@@ -192,7 +192,8 @@ public final class DeviceAuthorizationClient {
      * @throws InterruptedException when the thread is interrupted while waiting or while a poll is
      *     in flight; no further request is sent
      * @throws OAuthErrorException for a terminal OAuth error, such as {@code access_denied}, or
-     *     {@code expired_token} when the next poll would start after the codes expire
+     *     {@code expired_token} when the next poll would start after the codes expire or
+     *     a wait ends after they expire
      * @throws DevicePollException after a network error, a 5xx or a 429; resume with its interval
      * @throws KeycardException for any other failure, returned as is
      */
@@ -213,7 +214,8 @@ public final class DeviceAuthorizationClient {
      * @throws InterruptedException when the thread is interrupted while waiting or while a poll is
      *     in flight; no further request is sent
      * @throws OAuthErrorException for a terminal OAuth error, such as {@code access_denied}, or
-     *     {@code expired_token} when the next poll would start after the codes expire
+     *     {@code expired_token} when the next poll would start after the codes expire or
+     *     a wait ends after they expire
      * @throws DevicePollException after a network error, a 5xx or a 429; resume with its interval
      * @throws KeycardException for any other failure, returned as is
      */
@@ -234,6 +236,9 @@ public final class DeviceAuthorizationClient {
             sleeper.sleep(current);
             if (Thread.interrupted()) {
                 throw new InterruptedException("device polling was interrupted");
+            }
+            if (clock.instant().isAfter(authorization.expiresAt())) {
+                throw expired(authorization);
             }
             try {
                 return pollOnce(authorization);
