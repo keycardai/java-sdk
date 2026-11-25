@@ -2,11 +2,21 @@ package ai.keycard.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ai.keycard.oauth.JwtSigner;
+import ai.keycard.oauth.SigningKey;
 import ai.keycard.oauth.TokenVerifier;
 import ai.keycard.oauth.testing.StubZone;
+import com.nimbusds.jose.util.JSONObjectUtils;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -14,7 +24,7 @@ import java.util.logging.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** bearer-token-verification-middleware.md (spec-version 3), Unit Tests table. */
+/** bearer-token-verification-middleware.md, Unit Tests table. */
 class BearerTokenVerificationMiddlewareConformanceTest {
 
     @Test
@@ -76,6 +86,23 @@ class BearerTokenVerificationMiddlewareConformanceTest {
             assertThat(fields[5]).isEqualTo(TestServer.AUDIENCE);
             assertThat(Long.parseLong(fields[6])).isPositive();
         }
+    }
+
+    @Test
+    @DisplayName("row 4a: the caller exposes both audiences and the complete actor chain")
+    void row4a() throws Exception {
+        List<String> audiences = List.of("resource-a", "resource-b");
+        Map<String, Object> actor = Map.of("sub", "actor", "act", Map.of("sub", "previous"));
+
+        assertThat(callerClaims(audiences, Map.of("act", actor)))
+                .containsEntry("aud", audiences)
+                .containsEntry("act", actor);
+    }
+
+    @Test
+    @DisplayName("row 4b: the caller exposes a scalar audience as a one-element list")
+    void row4b() throws Exception {
+        assertThat(callerClaims("resource-a", Map.of())).containsEntry("aud", List.of("resource-a"));
     }
 
     @Test
@@ -237,6 +264,48 @@ class BearerTokenVerificationMiddlewareConformanceTest {
 
             assertThat(response.headers().firstValue("WWW-Authenticate").orElseThrow())
                     .contains("resource_metadata=\"https://127.0.0.1:");
+        }
+    }
+
+    private static Map<String, Object> callerClaims(Object audience, Map<String, Object> additionalClaims)
+            throws Exception {
+        try (StubZone zone = TestServer.zone();
+                TestServer server = new TestServer()
+                        .filter(
+                                "/mcp",
+                                RequireBearerAuthFilter.builder(TokenVerifier.builder(zone.issuer())
+                                                .audiences("resource-a")
+                                                .build())
+                                        .build())
+                        .servlet("/mcp", new HttpServlet() {
+                            private static final long serialVersionUID = 1L;
+
+                            @Override
+                            protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                                    throws IOException {
+                                response.getWriter()
+                                        .write(JSONObjectUtils.toJSONString(KeycardRequest.accessToken(request)
+                                                .orElseThrow()
+                                                .claims()));
+                            }
+                        })
+                        .start()) {
+            long now = Instant.now().getEpochSecond();
+            Map<String, Object> claims = new LinkedHashMap<>(additionalClaims);
+            claims.put("iss", zone.issuer().toString());
+            claims.put("sub", "user-1");
+            claims.put("client_id", "client-1");
+            claims.put("aud", audience);
+            claims.put("iat", now);
+            claims.put("exp", now + 300);
+            String token = JwtSigner.of(
+                            new SigningKey(TestServer.KEY.toRSAPrivateKey(), TestServer.KEY.getKeyID(), null))
+                    .sign(claims);
+
+            HttpResponse<String> response = server.get("/mcp", "Authorization", "Bearer " + token);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            return JSONObjectUtils.parse(response.body());
         }
     }
 
