@@ -44,12 +44,22 @@ record MetadataRetry(KeycardException failure, long until, long nextMillis) {
         }
         Throwable cause = failure instanceof JwksException.Fetch ? failure.getCause() : failure;
         long next = previous == null ? 1_000 : previous.nextMillis;
-        if (cause instanceof HttpStatusException status && (status.status() == 429 || status.status() == 503)) {
-            Duration delay = retryAfter(wallTime, status.retryAfter());
+        // An oversized response keeps its status and Retry-After, so it is paced like any other.
+        int status = 0;
+        String retryAfterHeader = null;
+        if (cause instanceof HttpStatusException http) {
+            status = http.status();
+            retryAfterHeader = http.retryAfter();
+        } else if (cause instanceof ResponseBodyTooLargeException oversized) {
+            status = oversized.status();
+            retryAfterHeader = oversized.retryAfter();
+        }
+        if (status == 429 || status == 503) {
+            Duration delay = retryAfter(wallTime, retryAfterHeader);
             if (delay != null) {
                 return new MetadataRetry(failure, now + delay.toNanos(), next);
             }
-            if (status.status() == 429) {
+            if (status == 429) {
                 return previous;
             }
         }

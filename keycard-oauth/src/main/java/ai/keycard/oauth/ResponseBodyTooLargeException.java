@@ -1,5 +1,7 @@
 package ai.keycard.oauth;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown when a decoded authorization-server HTTP response body exceeds {@link
  * KeycardHttpTransport#MAX_RESPONSE_BODY_BYTES} while streaming.
@@ -16,6 +18,9 @@ public final class ResponseBodyTooLargeException extends OAuthProtocolException 
 
     /** The decoded byte limit that was exceeded. */
     private final int limit;
+
+    /** The Retry-After response header, if present. */
+    private final @Nullable String retryAfter;
 
     /**
      * Creates the exception with the default {@link KeycardHttpTransport#MAX_RESPONSE_BODY_BYTES}
@@ -34,6 +39,10 @@ public final class ResponseBodyTooLargeException extends OAuthProtocolException 
      * @param limit the decoded byte limit that was exceeded
      */
     public ResponseBodyTooLargeException(int status, int limit) {
+        this(status, limit, null);
+    }
+
+    ResponseBodyTooLargeException(int status, int limit, @Nullable String retryAfter) {
         super(
                 "response body exceeded the " + limit + "-byte decoded size limit (HTTP " + status + ")",
                 INVALID_RESPONSE,
@@ -41,6 +50,12 @@ public final class ResponseBodyTooLargeException extends OAuthProtocolException 
                 isRetryableStatus(status));
         this.status = status;
         this.limit = limit;
+        this.retryAfter = retryAfter;
+    }
+
+    @Nullable
+    String retryAfter() {
+        return retryAfter;
     }
 
     /**
