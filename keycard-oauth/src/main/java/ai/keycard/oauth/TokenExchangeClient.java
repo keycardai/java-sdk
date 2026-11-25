@@ -118,7 +118,7 @@ public final class TokenExchangeClient {
         if (scope != null) {
             request = request.toBuilder().scope(scope).build();
         }
-        return exchangeToken(request);
+        return exchangeToken(request, false);
     }
 
     /**
@@ -134,13 +134,17 @@ public final class TokenExchangeClient {
      * @throws KeycardException for discovery, HTTP, network and response-format failures
      */
     public TokenResponse exchangeToken(TokenExchangeRequest request) {
+        return exchangeToken(request, true);
+    }
+
+    private TokenResponse exchangeToken(TokenExchangeRequest request, boolean prepareAssertion) {
         TokenExchangeRequest withActor = request;
         if (actor != null && request.actorToken() == null) {
             withActor = request.toBuilder()
                     .actorToken(fetchActor(actor), TokenTypes.JWT)
                     .build();
         }
-        return send(withActor);
+        return send(withActor, prepareAssertion);
     }
 
     /**
@@ -169,7 +173,7 @@ public final class TokenExchangeClient {
                 .subjectTokenType(TokenTypes.SUBSTITUTE_USER)
                 .resource(resource)
                 .scope(scope);
-        return send(request.build());
+        return send(request.build(), true);
     }
 
     /**
@@ -210,16 +214,42 @@ public final class TokenExchangeClient {
         return issuer;
     }
 
-    private TokenResponse send(TokenExchangeRequest request) {
-        if (request.clientAssertion() == null && !(credential instanceof ClientAuthenticator)) {
+    private TokenResponse send(TokenExchangeRequest request, boolean prepareAssertion) {
+        if (request.clientAssertion() == null && credential == null) {
             throw new ConfigurationException(
                     "token exchange needs client authentication: a credential that provides it, or a clientAssertion on the request");
         }
         URI endpoint = metadata.tokenEndpoint(issuer);
-        ClientAuthentication auth = request.clientAssertion() != null
-                ? new ClientAuthentication(Map.of(), Map.of())
-                : ((ClientAuthenticator) Objects.requireNonNull(credential)).authenticate(issuer, endpoint);
+        ClientAuthentication auth = new ClientAuthentication(Map.of(), Map.of());
+        if (request.clientAssertion() == null && credential != null) {
+            if (prepareAssertion) {
+                request = withPreparedAssertion(request, credential, endpoint);
+            }
+            if (request.clientAssertion() == null) {
+                if (!(credential instanceof ClientAuthenticator authenticator)) {
+                    throw new ConfigurationException("token exchange credential supplied no client authentication");
+                }
+                auth = authenticator.authenticate(issuer, endpoint);
+            }
+        }
         return TokenEndpoint.post(transport, endpoint, request.formParameters(), auth, fetchTimeout, "token exchange");
+    }
+
+    private TokenExchangeRequest withPreparedAssertion(
+            TokenExchangeRequest request, Credential credential, URI endpoint) {
+        if (credential instanceof ClientSecret) {
+            return request;
+        }
+        TokenExchangeRequest prepared = credential.prepareTokenExchangeRequest(
+                TokenExchangeContext.of(request.subjectToken(), request.resource(), issuer)
+                        .withTokenEndpoint(endpoint));
+        if (prepared.clientAssertion() == null) {
+            return request;
+        }
+        return request.toBuilder()
+                .clientAssertion(prepared.clientAssertion(), Objects.requireNonNull(prepared.clientAssertionType()))
+                .clientId(prepared.clientId())
+                .build();
     }
 
     /** {@code base64url(header).base64url(payload).} with {@code alg: none} and no signature. */

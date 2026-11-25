@@ -18,6 +18,7 @@ import ai.keycard.oauth.TokenResponse;
 import ai.keycard.oauth.TokenTypes;
 import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.WorkloadIdentity;
+import ai.keycard.oauth.WorkloadIdentityRuntimeException;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.TestClock;
 import java.net.ConnectException;
@@ -155,6 +156,110 @@ class TokenExchangeConformanceTest {
                     .containsEntry("client_id", List.of("engine"))
                     .containsEntry("resource", List.of(RESOURCE.toString()));
             assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4b: direct exchange prepares only authentication and preserves caller fields")
+    void row4b() {
+        try (StubZone zone = zone()) {
+            TokenExchangeClient.builder(zone.issuer())
+                    .credential(context -> {
+                        assertThat(context.subjectToken()).isEqualTo("subject");
+                        assertThat(context.resource()).isEqualTo(RESOURCE);
+                        assertThat(context.issuer()).isEqualTo(zone.issuer());
+                        assertThat(context.tokenEndpoint())
+                                .isEqualTo(zone.issuer().resolve(StubZone.TOKEN_PATH));
+                        return TokenExchangeRequest.builder("ignored")
+                                .resource(URI.create("https://ignored.example.com"))
+                                .scope("ignored")
+                                .clientAssertion("prepared.jwt", TokenTypes.JWT_BEARER_ASSERTION)
+                                .clientId("prepared-client")
+                                .build();
+                    })
+                    .build()
+                    .exchangeToken(TokenExchangeRequest.builder("subject")
+                            .resource(RESOURCE)
+                            .scope("read")
+                            .build());
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("subject_token", List.of("subject"))
+                    .containsEntry("resource", List.of(RESOURCE.toString()))
+                    .containsEntry("scope", List.of("read"))
+                    .containsEntry("client_assertion", List.of("prepared.jwt"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("prepared-client"));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4c: a caller assertion bypasses credential preparation")
+    void row4c() {
+        try (StubZone zone = zone()) {
+            TokenExchangeClient.builder(zone.issuer())
+                    .credential(context -> {
+                        throw new AssertionError("should not prepare");
+                    })
+                    .build()
+                    .exchangeToken(TokenExchangeRequest.builder("subject")
+                            .clientAssertion("caller.jwt", TokenTypes.JWT_BEARER_ASSERTION)
+                            .clientId("caller-client")
+                            .build());
+
+            StubZone.RecordedRequest request =
+                    zone.requests(StubZone.TOKEN_PATH).get(0);
+            assertThat(request.formParams())
+                    .containsEntry("client_assertion", List.of("caller.jwt"))
+                    .containsEntry("client_assertion_type", List.of(TokenTypes.JWT_BEARER_ASSERTION))
+                    .containsEntry("client_id", List.of("caller-client"));
+            assertThat(request.header("Authorization")).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4d: a failed identity source aborts before the token POST")
+    void row4d() {
+        try (StubZone zone = zone()) {
+            IllegalStateException failure = new IllegalStateException("source unavailable");
+            TokenExchangeClient client = TokenExchangeClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.of(() -> {
+                        throw failure;
+                    }))
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeToken(
+                            TokenExchangeRequest.builder("subject").build()))
+                    .isInstanceOf(WorkloadIdentityRuntimeException.class)
+                    .hasCause(failure);
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("row 4e: the prepared client ID replaces the caller's, or is omitted for v1")
+    void row4e() {
+        try (StubZone zone = zone()) {
+            TokenExchangeRequest request = TokenExchangeRequest.builder("subject")
+                    .clientId("caller-client")
+                    .build();
+            TokenExchangeClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.builder(() -> "prepared.jwt")
+                            .clientId("engine")
+                            .build())
+                    .build()
+                    .exchangeToken(request);
+            TokenExchangeClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.of(() -> "prepared.jwt"))
+                    .build()
+                    .exchangeToken(request);
+
+            List<StubZone.RecordedRequest> posts = zone.requests(StubZone.TOKEN_PATH);
+            assertThat(posts.get(0).formParams()).containsEntry("client_id", List.of("engine"));
+            assertThat(posts.get(1).formParams()).doesNotContainKey("client_id");
         }
     }
 
