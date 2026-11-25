@@ -109,7 +109,7 @@ public final class ClientSecret implements Credential, ClientAuthenticator {
      * The Basic header for the zone, and no form fields.
      *
      * @param issuer the zone's issuer
-     * @param endpoint the URL the request goes to; unused, since Basic carries no audience
+     * @param endpoint the assertion audience URL, unused because Basic carries no audience
      * @return the authentication
      * @throws ConfigurationException when a multi-zone credential holds nothing for the zone
      */

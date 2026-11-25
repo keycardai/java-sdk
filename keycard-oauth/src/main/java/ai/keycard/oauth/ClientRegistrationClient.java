@@ -25,8 +25,8 @@ import org.jspecify.annotations.Nullable;
 public final class ClientRegistrationClient {
 
     /**
-     * The RFC 7591 §3.2.2 codes, which describe the request's metadata: sending it again unchanged
-     * can't succeed, so they're never retryable.
+     * The RFC 7591 §3.2.2 codes, which describe the request's metadata and are retryable only on
+     * HTTP 429 or 5xx.
      */
     static final java.util.Set<String> REGISTRATION_ERRORS = java.util.Set.of(
             "invalid_redirect_uri",
@@ -74,7 +74,8 @@ public final class ClientRegistrationClient {
      * @return the registered client
      * @throws ConfigurationException when the zone advertises no registration endpoint
      * @throws OAuthErrorException for an RFC 7591 §3.2.2 error, such as {@code
-     *     invalid_redirect_uri} or {@code invalid_client_metadata}, which are never retryable
+     *     invalid_redirect_uri} or {@code invalid_client_metadata}, which are retryable only on HTTP
+     *     429 or 5xx
      * @throws OAuthProtocolException with code {@code invalid_response} when the response has no
      *     {@code client_id} or isn't JSON
      * @throws KeycardException for discovery, HTTP and network failures
