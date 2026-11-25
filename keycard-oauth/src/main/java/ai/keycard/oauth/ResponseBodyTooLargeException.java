@@ -3,11 +3,10 @@ package ai.keycard.oauth;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Thrown when a decoded authorization-server HTTP response body exceeds {@link
- * KeycardHttpTransport#MAX_RESPONSE_BODY_BYTES} while streaming.
+ * Thrown when a decoded HTTP response body exceeds the configured limit while streaming.
  *
  * <p>Retryability is classified from the HTTP status code: {@code 2xx}, {@code 429}, and {@code
- * 5xx} are retryable; other non-2xx statuses (such as {@code 400}) are not.
+ * 5xx} are retryable unless the operation explicitly marks the failure non-retryable.
  */
 public final class ResponseBodyTooLargeException extends OAuthProtocolException {
 
@@ -43,14 +42,28 @@ public final class ResponseBodyTooLargeException extends OAuthProtocolException 
     }
 
     ResponseBodyTooLargeException(int status, int limit, @Nullable String retryAfter) {
+        this(status, limit, retryAfter, isRetryableStatus(status), null);
+    }
+
+    private ResponseBodyTooLargeException(
+            int status, int limit, @Nullable String retryAfter, boolean retryable, @Nullable Throwable cause) {
         super(
                 "response body exceeded the " + limit + "-byte decoded size limit (HTTP " + status + ")",
                 INVALID_RESPONSE,
-                null,
-                isRetryableStatus(status));
+                cause,
+                retryable);
         this.status = status;
         this.limit = limit;
         this.retryAfter = retryAfter;
+    }
+
+    /**
+     * Classifies the overflow as non-retryable while preserving its response details.
+     *
+     * @return a non-retryable exception
+     */
+    public ResponseBodyTooLargeException nonRetryable() {
+        return retryable() ? new ResponseBodyTooLargeException(status, limit, retryAfter, false, this) : this;
     }
 
     @Nullable

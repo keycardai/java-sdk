@@ -3,6 +3,7 @@ package ai.keycard.a2a;
 import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.KeycardHttpTransport;
+import ai.keycard.oauth.ResponseBodyTooLargeException;
 import ai.keycard.oauth.TransportRequest;
 import ai.keycard.oauth.TransportResponse;
 import com.nimbusds.jose.util.JSONObjectUtils;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves an agent's base URL to its agent card, fetched from {@link
@@ -26,6 +28,8 @@ public final class ServiceDiscovery {
     /** How long a card is reused before it's fetched again. */
     public static final Duration DEFAULT_CACHE_TTL = Duration.ofMinutes(15);
 
+    static final int DEFAULT_MAX_PEER_RESPONSE_BYTES = 64 * 1024 * 1024;
+
     private record Entry(AgentCard card, Instant fetchedAt) {}
 
     private final KeycardHttpTransport transport;
@@ -35,7 +39,13 @@ public final class ServiceDiscovery {
     private final Map<String, Entry> cards = new ConcurrentHashMap<>();
 
     private ServiceDiscovery(Builder builder) {
-        this.transport = builder.transport;
+        if (builder.transport != null) {
+            this.transport = builder.transport;
+        } else {
+            KeycardHttpTransport defaultTransport = KeycardHttpTransport.create();
+            int limit = builder.maxPeerResponseBytes;
+            this.transport = request -> defaultTransport.sendWithLimit(request, limit);
+        }
         this.fetchTimeout = builder.fetchTimeout;
         this.cacheTtl = builder.cacheTtl;
         this.clock = builder.clock;
@@ -65,6 +75,7 @@ public final class ServiceDiscovery {
      * @param baseUrl the agent's base URL
      * @return the card
      * @throws A2aDiscoveryException when the card can't be fetched, isn't JSON, or has no name
+     * @throws ResponseBodyTooLargeException when the decoded card exceeds the peer response limit
      */
     public AgentCard getCard(URI baseUrl) {
         String key = key(baseUrl);
@@ -81,6 +92,7 @@ public final class ServiceDiscovery {
      * @param baseUrl the agent's base URL
      * @return the card
      * @throws A2aDiscoveryException when the card can't be fetched, isn't JSON, or has no name
+     * @throws ResponseBodyTooLargeException when the decoded card exceeds the peer response limit
      */
     public AgentCard refresh(URI baseUrl) {
         String key = key(baseUrl);
@@ -103,6 +115,8 @@ public final class ServiceDiscovery {
         TransportResponse response;
         try {
             response = transport.send(TransportRequest.get(url, fetchTimeout).withHeader("Accept", "application/json"));
+        } catch (ResponseBodyTooLargeException e) {
+            throw e;
         } catch (KeycardException e) {
             throw new A2aDiscoveryException(
                     "agent card fetch from " + url + " failed: " + e.getMessage(), e, e.retryable());
@@ -131,7 +145,8 @@ public final class ServiceDiscovery {
     /** Configures a {@link ServiceDiscovery}. */
     public static final class Builder {
 
-        private KeycardHttpTransport transport = KeycardHttpTransport.create();
+        private @Nullable KeycardHttpTransport transport;
+        private int maxPeerResponseBytes = DEFAULT_MAX_PEER_RESPONSE_BYTES;
         private Duration fetchTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private Duration cacheTtl = DEFAULT_CACHE_TTL;
         private Clock clock = Clock.systemUTC();
@@ -157,6 +172,21 @@ public final class ServiceDiscovery {
          */
         public Builder httpClient(HttpClient client) {
             return transport(KeycardHttpTransport.of(client));
+        }
+
+        /**
+         * Sets the default transport's decoded agent card limit, which defaults to 64 MiB.
+         *
+         * @param maxPeerResponseBytes a positive byte limit
+         * @return this builder
+         * @throws IllegalArgumentException if the limit is not positive
+         */
+        public Builder maxPeerResponseBytes(int maxPeerResponseBytes) {
+            if (maxPeerResponseBytes <= 0) {
+                throw new IllegalArgumentException("maxPeerResponseBytes must be positive");
+            }
+            this.maxPeerResponseBytes = maxPeerResponseBytes;
+            return this;
         }
 
         /**

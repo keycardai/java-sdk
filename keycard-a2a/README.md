@@ -25,4 +25,8 @@ cache. The module has no dependency on an A2A SDK, so the agent you call can be 
 them; [examples/a2a-delegation](../examples/a2a-delegation) calls an agent on the official
 a2a-java codec.
 
+Default transports limit decoded agent cards and invocation replies to 64 MiB.
+Use `maxPeerResponseBytes(int)` on either builder to set a positive byte limit.
+The option does not change the 1 MiB token exchange limit or cap a supplied transport.
+
 Javadoc: <https://javadoc.io/doc/ai.keycard/keycard-a2a>
