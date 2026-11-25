@@ -1,3 +1,17 @@
+## v0.5.0 (2026-11-25)
+
+
+- feat(oauth): token revocation (SDK-96) (#26)
+- * feat(oauth): token revocation (SDK-96)
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): require HTTPS for token revocation
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * docs(oauth): clarify retryability and assertion audience
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+
 ## v0.4.0 (2026-11-25)
 
 
