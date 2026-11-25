@@ -15,6 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.InflaterInputStream;
 
@@ -24,7 +25,7 @@ import java.util.zip.InflaterInputStream;
  * <p>{@link HttpRequest.Builder#timeout} stops counting once response headers arrive, so a server
  * that stalls mid-body would hold the caller past it. The exchange is therefore sent
  * asynchronously and awaited for the request's timeout as a whole, then cancelled if it hasn't
- * finished. Response bodies are streamed and capped at {@link
+ * finished. Authorization-server response bodies are streamed and capped at {@link
  * KeycardHttpTransport#MAX_RESPONSE_BODY_BYTES} decoded bytes before buffering or parsing.
  */
 final class JdkHttpTransport implements KeycardHttpTransport {
@@ -37,19 +38,31 @@ final class JdkHttpTransport implements KeycardHttpTransport {
 
     @Override
     public TransportResponse send(TransportRequest request) {
+        return sendWithLimit(request, KeycardHttpTransport.MAX_RESPONSE_BODY_BYTES);
+    }
+
+    @Override
+    public TransportResponse sendUnbounded(TransportRequest request) {
+        return sendWithLimit(request, -1);
+    }
+
+    private TransportResponse sendWithLimit(TransportRequest request, int limit) {
         HttpRequest httpRequest = toHttpRequest(request);
         String host = request.uri().getHost();
+        AtomicReference<InputStream> bodyStream = new AtomicReference<>();
         CompletableFuture<TransportResponse> exchange = client.sendAsync(
                         httpRequest, HttpResponse.BodyHandlers.ofInputStream())
-                .thenApply(JdkHttpTransport::readBoundedResponse);
+                .thenApplyAsync(response -> readResponse(response, bodyStream, limit));
         try {
             return exchange.get(request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
+            closeQuietly(bodyStream.get());
             exchange.cancel(true);
             throw new NetworkException(
                     "request to " + host + " timed out after " + request.timeout(),
                     new HttpTimeoutException("request timed out after " + request.timeout()));
         } catch (InterruptedException e) {
+            closeQuietly(bodyStream.get());
             exchange.cancel(true);
             Thread.currentThread().interrupt();
             throw new NetworkException("request to " + host + " was interrupted", e);
@@ -74,18 +87,22 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         }
     }
 
-    private static TransportResponse readBoundedResponse(HttpResponse<InputStream> response) {
+    private static TransportResponse readResponse(
+            HttpResponse<InputStream> response, AtomicReference<InputStream> bodyStream, int limit) {
         int status = response.statusCode();
         String encoding = response.headers()
                 .firstValue("content-encoding")
                 .map(v -> v.trim().toLowerCase(Locale.ROOT))
                 .orElse("");
-        try (InputStream raw = response.body();
-                InputStream decoded = wrapEncoding(raw, encoding)) {
-            byte[] bytes = readBoundedBytes(decoded, status, KeycardHttpTransport.MAX_RESPONSE_BODY_BYTES);
+        InputStream raw = response.body();
+        bodyStream.set(raw);
+        try (InputStream decoded = wrapEncoding(raw, encoding)) {
+            byte[] bytes = readBytes(decoded, status, limit);
             return new TransportResponse(status, response.headers().map(), new String(bytes, StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } finally {
+            closeQuietly(raw);
         }
     }
 
@@ -97,19 +114,29 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         };
     }
 
-    private static byte[] readBoundedBytes(InputStream in, int status, int limit) throws IOException {
+    private static byte[] readBytes(InputStream in, int status, int limit) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
         int total = 0;
         int n;
         while ((n = in.read(buffer)) != -1) {
             total += n;
-            if (total > limit) {
+            if (limit > 0 && total > limit) {
                 throw new ResponseBodyTooLargeException(status, limit);
             }
             out.write(buffer, 0, n);
         }
         return out.toByteArray();
+    }
+
+    private static void closeQuietly(InputStream stream) {
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+                // Best-effort abort on timeout or cancellation.
+            }
+        }
     }
 
     private static HttpRequest toHttpRequest(TransportRequest request) {
