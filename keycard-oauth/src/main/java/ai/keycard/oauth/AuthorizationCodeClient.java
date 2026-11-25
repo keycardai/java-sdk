@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -131,7 +132,7 @@ public final class AuthorizationCodeClient {
      * @param pkce the PKCE pair
      * @param state the CSRF value, or {@code null}
      * @param scopes requested scopes, joined with spaces; empty sends none
-     * @param resources RFC 8707 resources, one {@code resource} parameter each
+     * @param resources RFC 8707 resources, one {@code resource} parameter per distinct value
      * @return the URL
      */
     public static URI buildAuthorizeUrl(
@@ -154,18 +155,34 @@ public final class AuthorizationCodeClient {
         if (state != null) {
             params.add(new String[] {"state", state});
         }
-        for (URI resource : resources) {
-            params.add(new String[] {"resource", resource.toString()});
+        resources.stream()
+                .map(URI::toString)
+                .distinct()
+                .forEach(resource -> params.add(new String[] {"resource", resource}));
+        return mergeAuthorizeQuery(authorizationEndpoint, params);
+    }
+
+    private static URI mergeAuthorizeQuery(URI endpoint, List<String[]> params) {
+        StringJoiner query = new StringJoiner("&");
+        String oldQuery = endpoint.getRawQuery();
+        if (oldQuery != null) {
+            for (String entry : oldQuery.split("&")) {
+                String key = URLDecoder.decode(entry.split("=", 2)[0], StandardCharsets.UTF_8);
+                if (!entry.isEmpty() && params.stream().noneMatch(param -> param[0].equals(key))) {
+                    query.add(entry);
+                }
+            }
         }
-        StringBuilder query = new StringBuilder();
         for (String[] param : params) {
-            query.append(query.length() == 0 ? "" : "&")
-                    .append(URLEncoder.encode(param[0], StandardCharsets.UTF_8))
-                    .append('=')
-                    .append(URLEncoder.encode(param[1], StandardCharsets.UTF_8));
+            query.add(URLEncoder.encode(param[0], StandardCharsets.UTF_8) + "="
+                    + URLEncoder.encode(param[1], StandardCharsets.UTF_8));
         }
-        String base = authorizationEndpoint.toString();
-        return URI.create(base + (authorizationEndpoint.getRawQuery() == null ? "?" : "&") + query);
+        String uri = endpoint.toString();
+        int fragmentStart = uri.indexOf('#');
+        String fragment = fragmentStart < 0 ? "" : uri.substring(fragmentStart);
+        int queryEnd = fragmentStart < 0 ? uri.length() : fragmentStart;
+        int baseEnd = oldQuery == null ? queryEnd : queryEnd - oldQuery.length() - 1;
+        return URI.create(uri.substring(0, baseEnd) + "?" + query + fragment);
     }
 
     /**
