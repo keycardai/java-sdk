@@ -21,6 +21,7 @@ import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.TokenExchangeContext;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenResponse;
+import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.WorkloadIdentity;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.RecordedRequest;
@@ -38,6 +39,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +60,33 @@ class DeviceAuthorizationConformanceTest {
             + "\"expires_in\":600,\"interval\":5}";
     private static final String TOKEN = "{\"access_token\":\"at\",\"token_type\":\"Bearer\",\"expires_in\":3600,"
             + "\"refresh_token\":\"rt\",\"id_token\":\"idt\",\"scope\":\"openid\"}";
+
+    @Test
+    @DisplayName("row 37: discovery Retry-After paces subsequent device authorization calls")
+    void row37() {
+        try (StubZone zone = zone()) {
+            TestClock[] clock = new TestClock[1];
+            AtomicBoolean throttle = new AtomicBoolean(true);
+            KeycardHttpTransport real = KeycardHttpTransport.create();
+            DeviceAuthorizationClient client = client(zone, clock, new ArrayList<>())
+                    .clientId("device-cli")
+                    .transport(request ->
+                            request.uri().getPath().equals(StubZone.DISCOVERY_PATH) && throttle.getAndSet(false)
+                                    ? new TransportResponse(503, Map.of("Retry-After", List.of("5")), "")
+                                    : real.send(request))
+                    .build();
+            assertThatThrownBy(() -> client.requestDeviceAuthorization(List.of(), List.of()))
+                    .isInstanceOf(HttpStatusException.class);
+            clock[0].advance(Duration.ofMillis(4999));
+            assertThatThrownBy(() -> client.requestDeviceAuthorization(List.of(), List.of()))
+                    .isInstanceOf(HttpStatusException.class);
+            assertThat(zone.requests(StubZone.DISCOVERY_PATH)).isEmpty();
+            assertThat(zone.requests(StubZone.DEVICE_AUTHORIZATION_PATH)).isEmpty();
+            clock[0].advance(Duration.ofMillis(1));
+            assertThat(client.requestDeviceAuthorization(List.of(), List.of())).isNotNull();
+            assertThat(zone.requests(StubZone.DISCOVERY_PATH)).hasSize(1);
+        }
+    }
 
     @Test
     @DisplayName("row 1: a credential, scopes and two resources go on the device authorization request")

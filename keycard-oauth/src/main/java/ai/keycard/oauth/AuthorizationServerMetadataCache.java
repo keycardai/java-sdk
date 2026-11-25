@@ -13,8 +13,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <ul>
  *   <li>Successful discovery is reused for {@code discoveryTtl} (default 1 hour).
- *   <li>A transient failure (network error, timeout, interruption, HTTP 429 or 5xx) is never
- *       recorded, so the next call fetches again.
+ *   <li>A transient failure can delay the next caller-initiated fetch.
  *   <li>A deterministic failure (any other HTTP 4xx, an issuer mismatch, a malformed document) is
  *       recorded for {@code negativeTtl} (default 1 minute, 0 to disable) and rethrown until then.
  *   <li>Concurrent callers on a cold issuer share one in-flight fetch. If the thread doing that
@@ -38,6 +37,7 @@ public final class AuthorizationServerMetadataCache {
     private final Duration discoveryTtl;
     private final Duration negativeTtl;
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, MetadataRetry> retries = new ConcurrentHashMap<>();
     private final SingleFlight<String, AuthorizationServerMetadata> inFlight = new SingleFlight<>();
 
     private AuthorizationServerMetadataCache(Builder builder) {
@@ -150,12 +150,14 @@ public final class AuthorizationServerMetadataCache {
      */
     public void invalidate(URI issuer) {
         entries.remove(key(issuer));
+        retries.remove(key(issuer));
         inFlight.forget(key(issuer));
     }
 
     /** Drops every cached outcome. */
     public void clear() {
         entries.clear();
+        retries.clear();
         inFlight.forgetAll();
     }
 
@@ -165,14 +167,19 @@ public final class AuthorizationServerMetadataCache {
         if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
             return entry.unwrap();
         }
+        MetadataRetry.check(retries.get(key), clock.instant());
         try {
             AuthorizationServerMetadata metadata = discovery.discover(issuer);
             entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
+            retries.remove(key);
             return metadata;
         } catch (KeycardException e) {
             boolean interrupted = e.getCause() instanceof InterruptedException;
             if (!interrupted && !e.retryable() && !negativeTtl.isZero()) {
                 entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
+            }
+            if (!interrupted && e.retryable()) {
+                retries.compute(key, (ignored, previous) -> MetadataRetry.after(previous, clock.instant(), e));
             }
             throw e;
         }

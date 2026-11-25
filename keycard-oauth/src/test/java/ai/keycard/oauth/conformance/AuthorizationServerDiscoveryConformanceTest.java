@@ -5,16 +5,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.keycard.oauth.AuthorizationServerDiscovery;
 import ai.keycard.oauth.AuthorizationServerMetadata;
+import ai.keycard.oauth.AuthorizationServerMetadataCache;
 import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.NetworkException;
 import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.testing.StubZone;
+import ai.keycard.oauth.testing.TestClock;
 import com.nimbusds.jose.util.JSONObjectUtils;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +28,27 @@ import org.junit.jupiter.api.Test;
 class AuthorizationServerDiscoveryConformanceTest {
 
     private final AuthorizationServerDiscovery discovery = AuthorizationServerDiscovery.create();
+
+    @Test
+    @DisplayName("row 11: cache-backed discovery paces later fetches, while standalone discovery does not")
+    void row11() {
+        try (StubZone zone = StubZone.start()) {
+            TestClock clock = TestClock.start();
+            AuthorizationServerMetadataCache cache = AuthorizationServerMetadataCache.builder()
+                    .discovery(discovery)
+                    .clock(clock)
+                    .build();
+            zone.respond("GET", StubZone.DISCOVERY_PATH, 503, "{}");
+            assertThatThrownBy(() -> cache.get(zone.issuer())).isInstanceOf(HttpStatusException.class);
+            zone.serveDiscovery();
+            assertThatThrownBy(() -> cache.get(zone.issuer())).isInstanceOf(HttpStatusException.class);
+            assertThat(zone.requests(StubZone.DISCOVERY_PATH)).hasSize(1);
+            assertThat(discovery.discover(zone.issuer()).issuer()).isEqualTo(zone.issuer());
+            clock.advance(Duration.ofMillis(1200));
+            assertThat(cache.get(zone.issuer()).issuer()).isEqualTo(zone.issuer());
+            assertThat(zone.requests(StubZone.DISCOVERY_PATH)).hasSize(3);
+        }
+    }
 
     @Test
     @DisplayName("row 1: valid issuer, well-formed document returns metadata with endpoints populated")

@@ -33,7 +33,7 @@ import org.jspecify.annotations.Nullable;
  *       JwksException.KeyNotFound} with no network call. Forged tokens naming random {@code kid}s
  *       therefore cost at most one fetch per cooldown.
  *   <li>Concurrent fetches for one {@code jwks_uri} share a single request, whatever {@code kid}
- *       each caller wants. Failures are never cached.
+ *       each caller wants. Transient failures can delay subsequent fetches.
  * </ul>
  *
  * <p>The cache belongs to this instance and is safe to use from many threads.
@@ -57,6 +57,7 @@ public final class JwksKeyring implements VerificationKeyring {
     private final Clock clock;
 
     private final ConcurrentHashMap<URI, KeySet> keySets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<URI, MetadataRetry> retries = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, URI> jwksUriByIssuer = new ConcurrentHashMap<>();
     private final Map<String, CachedKey> keys = new LinkedHashMap<>(16, 0.75f, true) {
         private static final long serialVersionUID = 1L;
@@ -166,6 +167,7 @@ public final class JwksKeyring implements VerificationKeyring {
         metadata.invalidate(issuer);
         if (jwksUri != null) {
             keySets.remove(jwksUri);
+            retries.remove(jwksUri);
             fetches.forget(jwksUri);
             String prefix = jwksUri + "#";
             synchronized (keys) {
@@ -179,6 +181,7 @@ public final class JwksKeyring implements VerificationKeyring {
         generation.incrementAndGet();
         jwksUriByIssuer.clear();
         keySets.clear();
+        retries.clear();
         fetches.forgetAll();
         metadata.clear();
         synchronized (keys) {
@@ -215,9 +218,19 @@ public final class JwksKeyring implements VerificationKeyring {
         if (current != null && current != stale) {
             return current;
         }
-        KeySet fetched = fetch(jwksUri);
+        MetadataRetry.check(retries.get(jwksUri), clock.instant());
+        KeySet fetched;
+        try {
+            fetched = fetch(jwksUri);
+        } catch (JwksException.Fetch e) {
+            if (e.retryable() && generation.get() == started) {
+                retries.compute(jwksUri, (ignored, previous) -> MetadataRetry.after(previous, clock.instant(), e));
+            }
+            throw e;
+        }
         if (generation.get() == started) {
             keySets.put(jwksUri, fetched);
+            retries.remove(jwksUri);
         }
         return fetched;
     }
@@ -239,8 +252,8 @@ public final class JwksKeyring implements VerificationKeyring {
             throw new JwksException.Fetch("fetching the JWKS at " + jwksUri + " failed", e, true);
         }
         if (!response.isSuccess()) {
-            HttpStatusException status = new HttpStatusException(
-                    "JWKS request returned HTTP " + response.status(), response.status(), response.body());
+            HttpStatusException status =
+                    new HttpStatusException("JWKS request returned HTTP " + response.status(), response);
             throw new JwksException.Fetch(
                     "the JWKS at " + jwksUri + " returned HTTP " + response.status(), status, status.retryable());
         }

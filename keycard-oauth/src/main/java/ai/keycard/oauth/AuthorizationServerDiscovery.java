@@ -96,10 +96,7 @@ public final class AuthorizationServerDiscovery {
         TransportResponse response =
                 transport.send(TransportRequest.get(url, fetchTimeout).withHeader("Accept", "application/json"));
         if (!response.isSuccess()) {
-            throw new HttpStatusException(
-                    "discovery for " + issuer + " returned HTTP " + response.status(),
-                    response.status(),
-                    response.body());
+            throw new HttpStatusException("discovery for " + issuer + " returned HTTP " + response.status(), response);
         }
         return parse(issuer, response.body());
     }

@@ -186,7 +186,7 @@ class JwksCachingConformanceTest {
     }
 
     @Test
-    @DisplayName("row 10: a JWKS network failure caches nothing; the next lookup fetches and succeeds")
+    @DisplayName("row 10: a JWKS network failure paces the next key-set fetch")
     void row10() {
         FakeZone fake = new FakeZone(k1);
         fake.failJwksTimes.set(1);
@@ -196,12 +196,15 @@ class JwksCachingConformanceTest {
                 .isInstanceOfSatisfying(
                         JwksException.Fetch.class,
                         e -> assertThat(e.retryable()).isTrue());
+        assertThatThrownBy(() -> keyring.resolve(FakeZone.ISSUER, "k1")).isInstanceOf(JwksException.Fetch.class);
+        assertThat(fake.jwksFetches).hasValue(1);
+        clock.advance(Duration.ofMillis(1200));
         assertThat(keyring.resolve(FakeZone.ISSUER, "k1")).isNotNull();
         assertThat(fake.jwksFetches).hasValue(2);
     }
 
     @Test
-    @DisplayName("row 11: a transient discovery failure caches nothing; the next lookup discovers again")
+    @DisplayName("row 11: a transient discovery failure paces the next discovery fetch")
     void row11() {
         FakeZone fake = new FakeZone(k1);
         fake.failDiscoveryTimes.set(1);
@@ -211,8 +214,29 @@ class JwksCachingConformanceTest {
                 .isInstanceOfSatisfying(
                         JwksException.Discovery.class,
                         e -> assertThat(e.retryable()).isTrue());
+        assertThatThrownBy(() -> keyring.resolve(FakeZone.ISSUER, "k1")).isInstanceOf(JwksException.Discovery.class);
+        assertThat(fake.discoveries).hasValue(1);
+        clock.advance(Duration.ofMillis(1200));
         assertThat(keyring.resolve(FakeZone.ISSUER, "k1")).isNotNull();
         assertThat(fake.discoveries).hasValue(2);
+    }
+
+    @Test
+    @DisplayName("row 20: a JWKS Retry-After delay is capped at 60 seconds and shared across kids")
+    void row20() {
+        FakeZone fake = new FakeZone(k1, k2);
+        fake.throttleFirstJwks = true;
+        JwksKeyring keyring = fake.keyring(clock);
+        assertThatThrownBy(() -> keyring.resolve(FakeZone.ISSUER, "k1"))
+                .isInstanceOfSatisfying(
+                        JwksException.Fetch.class,
+                        e -> assertThat(e.retryable()).isTrue());
+        clock.advance(Duration.ofMillis(59999));
+        assertThatThrownBy(() -> keyring.resolve(FakeZone.ISSUER, "k2")).isInstanceOf(JwksException.Fetch.class);
+        assertThat(fake.jwksFetches).hasValue(1);
+        clock.advance(Duration.ofMillis(1));
+        assertThat(keyring.resolve(FakeZone.ISSUER, "k2")).isNotNull();
+        assertThat(fake.jwksFetches).hasValue(2);
     }
 
     @Test
@@ -364,6 +388,7 @@ class JwksCachingConformanceTest {
         final List<String> log = new CopyOnWriteArrayList<>();
         volatile CountDownLatch jwksGate;
         volatile boolean blockFirstJwks;
+        boolean throttleFirstJwks;
 
         FakeZone(RSAKey... keys) {
             this.jwks = jwks(keys);
@@ -381,6 +406,9 @@ class JwksCachingConformanceTest {
                     return json("{\"issuer\":\"" + ISSUER + "\",\"jwks_uri\":\"" + ISSUER + "/jwks.json\"}");
                 }
                 int n = jwksFetches.incrementAndGet();
+                if (throttleFirstJwks && n == 1) {
+                    return new TransportResponse(429, Map.of("Retry-After", List.of("120")), "");
+                }
                 if (failJwksTimes.getAndDecrement() > 0) {
                     throw new NetworkException("refused", new ConnectException("refused"));
                 }

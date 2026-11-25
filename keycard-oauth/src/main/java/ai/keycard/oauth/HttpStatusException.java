@@ -1,5 +1,7 @@
 package ai.keycard.oauth;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A non-2xx response that is not an OAuth error response. Retryable for HTTP 429 and any 5xx,
  * not for any other status.
@@ -12,6 +14,9 @@ public class HttpStatusException extends KeycardException {
     private final int status;
     /** The response body, possibly empty. */
     private final String body;
+
+    /** The Retry-After response header, if present. */
+    private final @Nullable String retryAfter;
 
     /**
      * Creates the exception, classifying it from the status.
@@ -34,9 +39,29 @@ public class HttpStatusException extends KeycardException {
      * @param retryable whether repeating the operation unchanged could succeed
      */
     protected HttpStatusException(String message, int status, String body, boolean retryable) {
+        this(message, status, body, retryable, null);
+    }
+
+    HttpStatusException(String message, TransportResponse response) {
+        this(
+                message,
+                response.status(),
+                response.body(),
+                isRetryableStatus(response.status()),
+                response.header("Retry-After"));
+    }
+
+    private HttpStatusException(
+            String message, int status, String body, boolean retryable, @Nullable String retryAfter) {
         super(message, null, retryable);
         this.status = status;
         this.body = body;
+        this.retryAfter = retryAfter;
+    }
+
+    @Nullable
+    String retryAfter() {
+        return retryAfter;
     }
 
     /**
