@@ -428,7 +428,7 @@ class TokenExchangeConformanceTest {
     }
 
     @Test
-    @DisplayName("row 8: a discovery network error caches nothing; the next call discovers again")
+    @DisplayName("row 8: a discovery network error paces the next discovery request")
     void row8() {
         AtomicInteger discoveries = new AtomicInteger();
         KeycardHttpTransport transport = request -> {
@@ -443,6 +443,9 @@ class TokenExchangeConformanceTest {
         TokenExchangeClient client = transportClient(transport);
 
         assertThatThrownBy(() -> client.exchangeToken("subject", RESOURCE)).isInstanceOf(NetworkException.class);
+        assertThatThrownBy(() -> client.exchangeToken("subject", RESOURCE)).isInstanceOf(NetworkException.class);
+        assertThat(discoveries).hasValue(1);
+        clock.advance(Duration.ofMillis(1200));
         assertThat(client.exchangeToken("subject", RESOURCE).accessToken()).isEqualTo("xt");
         assertThat(discoveries).hasValue(2);
     }

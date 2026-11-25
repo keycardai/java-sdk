@@ -3,6 +3,7 @@ package ai.keycard.oauth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.testing.TestClock;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -137,6 +138,7 @@ class ResponseBodySizeLimitTest {
     void row1a_discoveryNegativeCaching() throws Exception {
         record Case(int status, boolean expectNegativeCached) {}
         for (Case tc : List.of(new Case(200, false), new Case(429, false), new Case(503, false), new Case(400, true))) {
+            TestClock clock = TestClock.start();
             AtomicInteger calls = new AtomicInteger();
             AtomicBoolean failFirst = new AtomicBoolean(true);
             HttpServer server = startServer();
@@ -154,6 +156,7 @@ class ResponseBodySizeLimitTest {
                 });
 
                 AuthorizationServerMetadataCache cache = AuthorizationServerMetadataCache.builder()
+                        .clock(clock)
                         .negativeTtl(Duration.ofMinutes(1))
                         .build();
 
@@ -161,6 +164,12 @@ class ResponseBodySizeLimitTest {
                 assertThat(calls.get()).isEqualTo(1);
 
                 failFirst.set(false);
+                if (tc.status() == 200 || tc.status() == 503) {
+                    // A retryable oversized response paces the next fetch with the base backoff.
+                    assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(ResponseBodyTooLargeException.class);
+                    assertThat(calls.get()).isEqualTo(1);
+                    clock.advance(Duration.ofMillis(1200));
+                }
                 if (tc.expectNegativeCached()) {
                     assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(ResponseBodyTooLargeException.class);
                     assertThat(calls.get()).isEqualTo(1);
@@ -194,13 +203,15 @@ class ResponseBodySizeLimitTest {
             });
             server.createContext("/jwks", ex -> send(ex, 200, makeTokenJson(512), null));
 
-            JwksKeyring keyring = JwksKeyring.create();
+            TestClock clock = TestClock.start();
+            JwksKeyring keyring = JwksKeyring.builder().clock(clock).build();
             assertThatThrownBy(() -> keyring.resolve(issuer, "k1"))
                     .isInstanceOf(JwksException.Discovery.class)
                     .satisfies(
                             e -> assertThat(((KeycardException) e).retryable()).isTrue());
 
             failDiscovery.set(false);
+            clock.advance(Duration.ofMillis(1200));
             assertThatThrownBy(() -> keyring.resolve(issuer, "k1"))
                     .isInstanceOf(JwksException.Fetch.class)
                     .satisfies(
@@ -451,6 +462,52 @@ class ResponseBodySizeLimitTest {
             assertThat(response.body()).isEmpty();
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    @DisplayName("row 1a: an oversized 429 or 503 keeps its Retry-After; an oversized 429 without one starts no delay")
+    void row1a_oversizedRetryAfterPacing() throws Exception {
+        record Case(int status, String retryAfter, long pacedMillis) {}
+        for (Case tc : List.of(
+                new Case(429, null, 0),
+                new Case(429, "soon", 0),
+                new Case(429, "5", 5_000),
+                new Case(503, "5", 5_000))) {
+            TestClock clock = TestClock.start();
+            AtomicInteger calls = new AtomicInteger();
+            HttpServer server = startServer();
+            try {
+                URI issuer = baseUri(server);
+                server.createContext("/.well-known/oauth-authorization-server", ex -> {
+                    if (calls.incrementAndGet() == 1) {
+                        if (tc.retryAfter() != null) {
+                            ex.getResponseHeaders().set("Retry-After", tc.retryAfter());
+                        }
+                        send(ex, tc.status(), makeTokenJson(512), null);
+                    } else {
+                        byte[] md = ("{\"issuer\":\"" + issuer + "\",\"token_endpoint\":\"" + issuer + "/token\"}")
+                                .getBytes(StandardCharsets.UTF_8);
+                        send(ex, 200, md, null);
+                    }
+                });
+                AuthorizationServerMetadataCache cache = AuthorizationServerMetadataCache.builder()
+                        .clock(clock)
+                        .negativeTtl(Duration.ofMinutes(1))
+                        .build();
+
+                assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(ResponseBodyTooLargeException.class);
+                if (tc.pacedMillis() > 0) {
+                    clock.advance(Duration.ofMillis(tc.pacedMillis() - 1));
+                    assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(ResponseBodyTooLargeException.class);
+                    assertThat(calls).as("%s", tc).hasValue(1);
+                    clock.advance(Duration.ofMillis(1));
+                }
+                assertThat(cache.get(issuer).tokenEndpoint()).isEqualTo(URI.create(issuer + "/token"));
+                assertThat(calls).as("%s", tc).hasValue(2);
+            } finally {
+                server.stop(0);
+            }
         }
     }
 }

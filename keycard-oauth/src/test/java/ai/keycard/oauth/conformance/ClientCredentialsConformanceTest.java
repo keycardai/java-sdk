@@ -306,7 +306,7 @@ class ClientCredentialsConformanceTest {
     }
 
     @Test
-    @DisplayName("row 7: a discovery network error caches nothing; the next call discovers again and succeeds")
+    @DisplayName("row 7: a discovery network error paces the next discovery request")
     void row7() {
         AtomicInteger discoveries = new AtomicInteger();
         KeycardHttpTransport transport = request -> {
@@ -326,6 +326,9 @@ class ClientCredentialsConformanceTest {
                 .build();
 
         assertThatThrownBy(client::requestToken).isInstanceOf(NetworkException.class);
+        assertThatThrownBy(client::requestToken).isInstanceOf(NetworkException.class);
+        assertThat(discoveries).hasValue(1);
+        clock.advance(Duration.ofMillis(1200));
         assertThat(client.requestToken().accessToken()).isEqualTo("at");
         assertThat(discoveries).hasValue(2);
     }

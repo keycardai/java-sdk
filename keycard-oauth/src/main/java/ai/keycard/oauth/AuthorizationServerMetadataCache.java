@@ -6,6 +6,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -13,8 +15,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <ul>
  *   <li>Successful discovery is reused for {@code discoveryTtl} (default 1 hour).
- *   <li>A transient failure (network error, timeout, interruption, HTTP 429 or 5xx) is never
- *       recorded, so the next call fetches again.
+ *   <li>A transient failure can delay the next caller-initiated fetch.
  *   <li>A deterministic failure (any other HTTP 4xx, an issuer mismatch, a malformed document) is
  *       recorded for {@code negativeTtl} (default 1 minute, 0 to disable) and rethrown until then.
  *   <li>Concurrent callers on a cold issuer share one in-flight fetch. If the thread doing that
@@ -38,11 +39,15 @@ public final class AuthorizationServerMetadataCache {
     private final Duration discoveryTtl;
     private final Duration negativeTtl;
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
+    private final MetadataRetry.Cache<String> retries = new MetadataRetry.Cache<>();
+    private final LongSupplier retryTicker;
+    private final Object writes = new Object();
     private final SingleFlight<String, AuthorizationServerMetadata> inFlight = new SingleFlight<>();
 
     private AuthorizationServerMetadataCache(Builder builder) {
         this.discovery = builder.discovery;
         this.clock = builder.clock;
+        this.retryTicker = MetadataRetry.ticker(clock);
         this.discoveryTtl = builder.discoveryTtl;
         // The default failure TTL shrinks to fit a short discovery TTL, so setting only
         // discoveryTtl (as TokenVerifier and the clients do) never fails; an explicit longer
@@ -90,7 +95,7 @@ public final class AuthorizationServerMetadataCache {
         if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
             return entry.unwrap();
         }
-        return inFlight.run(key, () -> fetch(key, issuer), "discovery of " + issuer);
+        return inFlight.runGuarded(key, current -> fetch(key, issuer, current), "discovery of " + issuer);
     }
 
     /**
@@ -149,30 +154,51 @@ public final class AuthorizationServerMetadataCache {
      * @param issuer the issuer to forget
      */
     public void invalidate(URI issuer) {
-        entries.remove(key(issuer));
-        inFlight.forget(key(issuer));
+        String key = key(issuer);
+        synchronized (writes) {
+            entries.remove(key);
+            retries.remove(key);
+            inFlight.forget(key);
+        }
     }
 
     /** Drops every cached outcome. */
     public void clear() {
-        entries.clear();
-        inFlight.forgetAll();
+        synchronized (writes) {
+            entries.clear();
+            retries.clear();
+            inFlight.forgetAll();
+        }
     }
 
-    private AuthorizationServerMetadata fetch(String key, URI issuer) {
+    private AuthorizationServerMetadata fetch(String key, URI issuer, BooleanSupplier current) {
         // Another caller may have finished a fetch while this one waited to lead.
-        Entry entry = entries.get(key);
-        if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
-            return entry.unwrap();
+        synchronized (writes) {
+            Entry entry = entries.get(key);
+            if (entry != null && clock.instant().isBefore(entry.expiresAt())) {
+                return entry.unwrap();
+            }
+            retries.check(key, retryTicker.getAsLong());
         }
         try {
             AuthorizationServerMetadata metadata = discovery.discover(issuer);
-            entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
+            synchronized (writes) {
+                if (current.getAsBoolean()) {
+                    entries.put(key, new Entry(metadata, null, clock.instant().plus(discoveryTtl)));
+                    retries.remove(key);
+                }
+            }
             return metadata;
         } catch (KeycardException e) {
             boolean interrupted = e.getCause() instanceof InterruptedException;
-            if (!interrupted && !e.retryable() && !negativeTtl.isZero()) {
-                entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
+            synchronized (writes) {
+                if (!interrupted && current.getAsBoolean()) {
+                    if (e.retryable()) {
+                        retries.record(key, retryTicker.getAsLong(), clock.instant(), e);
+                    } else if (!negativeTtl.isZero()) {
+                        entries.put(key, new Entry(null, e, clock.instant().plus(negativeTtl)));
+                    }
+                }
             }
             throw e;
         }

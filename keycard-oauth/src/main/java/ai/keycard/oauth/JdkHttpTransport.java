@@ -19,6 +19,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.InflaterInputStream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link KeycardHttpTransport} over the JDK's {@link HttpClient}.
@@ -103,7 +104,11 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         InputStream raw = response.body();
         bodyStream.set(raw);
         try (InputStream decoded = wrapEncoding(raw, encoding)) {
-            byte[] bytes = readBytes(decoded, status, limit);
+            byte[] bytes = readBytes(
+                    decoded,
+                    status,
+                    response.headers().firstValue("retry-after").orElse(null),
+                    limit);
             return new TransportResponse(status, response.headers().map(), new String(bytes, StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -131,7 +136,8 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         return new GZIPInputStream(in);
     }
 
-    private static byte[] readBytes(InputStream in, int status, int limit) throws IOException {
+    private static byte[] readBytes(InputStream in, int status, @Nullable String retryAfter, int limit)
+            throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
         int total = 0;
@@ -139,7 +145,7 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         while ((n = in.read(buffer)) != -1) {
             total += n;
             if (limit > 0 && total > limit) {
-                throw new ResponseBodyTooLargeException(status, limit);
+                throw new ResponseBodyTooLargeException(status, limit, retryAfter);
             }
             out.write(buffer, 0, n);
         }

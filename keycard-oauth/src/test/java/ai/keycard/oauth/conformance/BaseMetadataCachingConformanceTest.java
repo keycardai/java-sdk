@@ -17,8 +17,11 @@ import ai.keycard.oauth.testing.TestClock;
 import java.net.ConnectException;
 import java.net.URI;
 import java.time.Duration;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -68,7 +71,7 @@ class BaseMetadataCachingConformanceTest {
     }
 
     @Test
-    @DisplayName("not sticky: HTTP 5xx and 429 are not recorded; the next call fetches again")
+    @DisplayName("row 3: 5xx responses are paced; a 429 without Retry-After is not")
     void transientHttpFailuresAreNotCached() {
         for (int status : List.of(503, 500, 429)) {
             try (StubZone zone = StubZone.start()) {
@@ -79,33 +82,191 @@ class BaseMetadataCachingConformanceTest {
                 assertThatThrownBy(() -> cache.get(zone.issuer())).isInstanceOf(HttpStatusException.class);
                 assertThat(zone.requests(StubZone.DISCOVERY_PATH))
                         .as("%d", status)
-                        .hasSize(2);
+                        .hasSize(status == 429 ? 2 : 1);
 
                 zone.serveDiscovery();
+                clock.advance(Duration.ofMillis(1200));
                 assertThat(cache.get(zone.issuer()).issuer()).isEqualTo(zone.issuer());
             }
         }
     }
 
     @Test
-    @DisplayName("not sticky: a network error is not recorded; the next call fetches again")
+    @DisplayName("row 3: network failures use jittered exponential delays capped at 30 seconds")
     void networkFailuresAreNotCached() {
         AtomicInteger calls = new AtomicInteger();
         KeycardHttpTransport transport = request -> {
-            if (calls.incrementAndGet() == 1) {
+            if (calls.incrementAndGet() <= 7) {
                 throw new NetworkException("refused", new ConnectException("refused"));
             }
             return ok(METADATA);
         };
         AuthorizationServerMetadataCache cache = cache(transport, Duration.ofHours(1), Duration.ofMinutes(1));
 
-        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+        long[] earliest = {800, 1600, 3200, 6400, 12800, 25600, 30000};
+        long[] latest = {1200, 2400, 4800, 9600, 19200, 30000, 30000};
+        for (int i = 0; i < earliest.length; i++) {
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+            clock.advance(Duration.ofMillis(earliest[i] - 1));
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+            assertThat(calls).hasValue(i + 1);
+            clock.advance(Duration.ofMillis(latest[i] - earliest[i] + 1));
+        }
+        assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+        assertThat(calls).hasValue(8);
+    }
+
+    @Test
+    @DisplayName("row 2: Retry-After seconds and dates gate requests, capped at 60 seconds")
+    void retryAfter() {
+        for (int status : List.of(429, 503)) {
+            for (long delay : List.of(5L, 120L)) {
+                for (DateTimeFormatter formatter : List.of(
+                        DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", Locale.US),
+                        DateTimeFormatter.ofPattern("EEEE, dd-MMM-uu HH:mm:ss 'GMT'", Locale.US),
+                        DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss uuuu", Locale.US))) {
+                    assertRetryAfter(
+                            status,
+                            delay,
+                            formatter.format(clock.instant().plusSeconds(delay).atZone(ZoneOffset.UTC)));
+                }
+                assertRetryAfter(status, delay, Long.toString(delay));
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("row 2: a malformed HTTP-date on a 429 does not pace the next fetch")
+    void rejectsMalformedRetryAfterDates() {
+        for (String header : List.of(
+                "Tue, 10 Nov 2026 12:01 GMT",
+                "Tue, 10 Nov 2026 12:01:00 +0000",
+                "Tue, 10 Nov 2026 12:01:00 GMT junk",
+                "Tue Nov 32 12:01:00 2026")) {
+            AtomicInteger calls = new AtomicInteger();
+            AuthorizationServerMetadataCache cache = cache(
+                    request -> calls.incrementAndGet() == 1
+                            ? new TransportResponse(429, Map.of("Retry-After", List.of(header)), "")
+                            : ok(METADATA),
+                    Duration.ofHours(1),
+                    Duration.ofMinutes(1));
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+            assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+            assertThat(calls).hasValue(2);
+        }
+    }
+
+    @Test
+    @DisplayName("row 3: an invalidated transient failure does not pace the next fetch")
+    void invalidationDiscardsPendingFailure() {
+        for (int status : List.of(400, 503)) {
+            AtomicInteger calls = new AtomicInteger();
+            AtomicReference<AuthorizationServerMetadataCache> cacheRef = new AtomicReference<>();
+            AuthorizationServerMetadataCache cache = cache(
+                    request -> {
+                        if (calls.incrementAndGet() == 1) {
+                            cacheRef.get().invalidate(ISSUER);
+                            return new TransportResponse(status, Map.of("Retry-After", List.of("60")), "");
+                        }
+                        return ok(METADATA);
+                    },
+                    Duration.ofHours(1),
+                    Duration.ofMinutes(1));
+            cacheRef.set(cache);
+            assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+            assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+            assertThat(calls).hasValue(2);
+        }
+    }
+
+    @Test
+    @DisplayName("row 3: invalidating one issuer preserves another issuer's pending retry")
+    void invalidationPreservesOtherIssuersPendingRetry() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<AuthorizationServerMetadataCache> cacheRef = new AtomicReference<>();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> {
+                    calls.incrementAndGet();
+                    cacheRef.get().invalidate(URI.create("https://other.example.com"));
+                    return new TransportResponse(503, Map.of("Retry-After", List.of("60")), "");
+                },
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        cacheRef.set(cache);
+        var first = org.assertj.core.api.Assertions.catchThrowable(() -> cache.get(ISSUER));
+        assertThat(first).isInstanceOf(HttpStatusException.class);
+        assertThatThrownBy(() -> cache.get(ISSUER)).isSameAs(first);
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    @DisplayName("row 3: retry pacing evicts the oldest issuer when its cache is full")
+    void boundsRetryCache() {
+        AtomicInteger calls = new AtomicInteger();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> {
+                    calls.incrementAndGet();
+                    return new TransportResponse(503, Map.of("Retry-After", List.of("60")), "");
+                },
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        for (int i = 0; i <= 128; i++) {
+            URI issuer = URI.create("https://issuer" + i + ".example.com");
+            assertThatThrownBy(() -> cache.get(issuer)).isInstanceOf(HttpStatusException.class);
+        }
+        assertThatThrownBy(() -> cache.get(URI.create("https://issuer128.example.com")))
+                .isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(129);
+        assertThatThrownBy(() -> cache.get(URI.create("https://issuer0.example.com")))
+                .isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(130);
+    }
+
+    private void assertRetryAfter(int status, long delay, String header) {
+        AtomicInteger calls = new AtomicInteger();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> calls.incrementAndGet() == 1
+                        ? new TransportResponse(status, Map.of("Retry-After", List.of(header)), "")
+                        : ok(METADATA),
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+        clock.advance(Duration.ofSeconds(Math.min(60, delay)).minusMillis(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(HttpStatusException.class);
+        assertThat(calls).hasValue(1);
+        clock.advance(Duration.ofMillis(1));
         assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
         assertThat(calls).hasValue(2);
     }
 
     @Test
-    @DisplayName("deterministic failures (other 4xx, malformed, issuer mismatch) are held for negative_ttl only")
+    @DisplayName("row 4: a successful fetch resets the backoff for the next refresh")
+    void successResetsBackoff() {
+        AtomicInteger calls = new AtomicInteger();
+        AuthorizationServerMetadataCache cache = cache(
+                request -> {
+                    int call = calls.incrementAndGet();
+                    if (call == 1 || call == 2 || call == 4) {
+                        throw new NetworkException("refused", new ConnectException("refused"));
+                    }
+                    return ok(METADATA);
+                },
+                Duration.ofHours(1),
+                Duration.ofMinutes(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+        clock.advance(Duration.ofMillis(1200));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+        clock.advance(Duration.ofMillis(2400));
+        assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+        clock.advance(Duration.ofHours(1));
+        assertThatThrownBy(() -> cache.get(ISSUER)).isInstanceOf(NetworkException.class);
+        clock.advance(Duration.ofMillis(1200));
+        assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
+        assertThat(calls).hasValue(5);
+    }
+
+    @Test
+    @DisplayName("row 5: deterministic failures (other 4xx, malformed, issuer mismatch) use negative_ttl only")
     void deterministicFailuresAreCachedForNegativeTtl() {
         for (String body : List.of("<html>", "{\"issuer\":\"https://other.example\"}")) {
             try (StubZone zone = StubZone.start()) {
@@ -220,6 +381,7 @@ class BaseMetadataCachingConformanceTest {
             assertThatThrownBy(() -> follower.get(5, TimeUnit.SECONDS)).hasCauseInstanceOf(HttpStatusException.class);
             assertThat(calls).hasValue(1);
 
+            clock.advance(Duration.ofMillis(1200));
             assertThat(cache.get(ISSUER).issuer()).isEqualTo(ISSUER);
             assertThat(calls).hasValue(2);
         } finally {
@@ -228,7 +390,7 @@ class BaseMetadataCachingConformanceTest {
     }
 
     @Test
-    @DisplayName("one caller's cancellation does not poison the shared fetch for the others")
+    @DisplayName("row 6: one caller's interruption does not poison the shared fetch for the others")
     void fetcherInterruptionDoesNotPoisonWaiters() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         CountDownLatch entered = new CountDownLatch(1);
