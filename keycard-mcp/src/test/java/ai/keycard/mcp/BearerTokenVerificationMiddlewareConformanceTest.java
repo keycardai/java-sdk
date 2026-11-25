@@ -227,6 +227,16 @@ class BearerTokenVerificationMiddlewareConformanceTest {
         }
     }
 
+    @Test
+    @DisplayName("row 8e: the auth provider rejects explicitly empty audiences")
+    void row8eAuthProvider() {
+        try (StubZone zone = TestServer.zone()) {
+            assertThatThrownBy(() -> AuthProvider.builder(zone.issuer()).audiences())
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("audiences");
+        }
+    }
+
     private void assertAudienceResponse(Object audience, int status) {
         try (StubZone zone = TestServer.zone();
                 TestServer server = new TestServer()
