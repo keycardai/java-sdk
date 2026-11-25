@@ -1,3 +1,55 @@
+## v0.4.0 (2026-11-25)
+
+
+- fix(oauth): pace retries for cached metadata fetches (#20)
+- * fix(oauth): pace retries for cached metadata fetches
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): accept all HTTP-date forms for metadata retry pacing
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): reject malformed retry dates and stale retry outcomes
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): isolate discovery invalidation by issuer
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): pace oversized 429 and 503 responses by status and Retry-After
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+Co-authored-by: Larry Osakwe <23560354+Larry-Osakwe@users.noreply.github.com>
+- fix(oauth): cap decoded authorization-server responses at 1 MiB (#19)
+- * fix(oauth): cap decoded authorization-server responses at 1 MiB
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): read response body asynchronously within request timeout
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth,a2a): allow unbounded agent replies via sendUnbounded
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): cancel the send future on timeout and read empty gzip bodies
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+Co-authored-by: Larry Osakwe <23560354+Larry-Osakwe@users.noreply.github.com>
+- fix(oauth)!: reject request client IDs with Basic token exchange (#18)
+- * fix(oauth)!: reject request client IDs with Basic token exchange
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(oauth): guard token exchange with custom Basic authentication
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+- fix(oauth): apply prepared authentication to direct token exchange (#17)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+- fix(oauth): reject explicitly empty verifier audiences (#16)
+- * fix(oauth): reject explicitly empty verifier audiences
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- * fix(mcp): reject explicitly empty auth provider audiences
+- Co-Authored-By: Larry Osakwe <larry@keycard.ai>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+- fix(oauth): normalize the verified caller audience (#15)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.3.1 (2026-11-25)
 
 
