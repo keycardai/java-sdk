@@ -19,7 +19,8 @@ public interface ClientAuthenticator {
      * The headers and form fields that authenticate the client on one request.
      *
      * @param issuer the zone's issuer, which picks the zone for a multi-zone credential
-     * @param endpoint the URL the request goes to, the audience of an assertion
+     * @param endpoint the URL to use as an assertion audience, normally the request endpoint.
+     *     Token revocation uses the zone issuer.
      * @return what to merge into the request
      * @throws ConfigurationException when the credential has nothing for this zone
      */

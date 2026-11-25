@@ -1,8 +1,8 @@
 # keycard-oauth
 
 OAuth 2.0 for Keycard zones: token exchange (RFC 8693), client credentials, authorization code
-with PKCE and refresh, the device authorization grant (RFC 8628), dynamic client registration
-(RFC 7591), discovery (RFC 8414), UserInfo, JWT signing and verification with a cached JWKS
+with PKCE and refresh, token revocation (RFC 7009), the device authorization grant (RFC 8628),
+dynamic client registration (RFC 7591), discovery (RFC 8414), UserInfo, JWT signing and verification with a cached JWKS
 keyring, and the `AccessContext` that holds per-resource results. Its only runtime dependency
 is Nimbus JOSE + JWT.
 
@@ -54,6 +54,18 @@ TokenResponse tokens = auth.authenticate(AuthorizationCodeClient.Loopback.builde
 
 On a machine with no browser, `DeviceAuthorizationClient` runs the device grant:
 `requestDeviceAuthorization(...)`, show the user code, then `pollUntilDone(...)`.
+
+## Revoke a token
+
+```java
+TokenRevocationClient revocation = TokenRevocationClient.builder(zone)
+        .credential(ClientSecret.of(clientId, clientSecret))
+        .build();
+revocation.revokeToken(refreshToken);
+```
+
+Revoking a Keycard refresh token revokes its session. The client uses the zone's advertised
+revocation endpoint. Pass already discovered metadata to `builder(metadata)` to skip discovery.
 
 ## Errors
 

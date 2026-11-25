@@ -3,8 +3,9 @@ package ai.keycard.oauth;
 import org.jspecify.annotations.Nullable;
 
 /**
- * An OAuth error response from the authorization server (RFC 6749 §5.2). Retryable unless the
- * {@link #error()} code is in {@link OAuthErrorCodes#PERMANENT}.
+ * An OAuth error response from the authorization server (RFC 6749 §5.2). HTTP 429 and 5xx are
+ * always retryable. For other statuses, retryability follows the OAuth error code and the
+ * operation's error policy.
  */
 public class OAuthErrorException extends HttpStatusException {
 
@@ -20,7 +21,7 @@ public class OAuthErrorException extends HttpStatusException {
     private final @Nullable String reason;
 
     /**
-     * Creates the exception, classifying it from the error code.
+     * Creates the exception, classifying it from the HTTP status and error code.
      *
      * @param message what failed
      * @param status the HTTP status code
@@ -83,7 +84,7 @@ public class OAuthErrorException extends HttpStatusException {
             @Nullable String errorUri,
             @Nullable String reason,
             boolean retryable) {
-        super(message, status, body, retryable);
+        super(message, status, body, isRetryableStatus(status) || retryable);
         this.error = error;
         this.errorDescription = errorDescription;
         this.errorUri = errorUri;

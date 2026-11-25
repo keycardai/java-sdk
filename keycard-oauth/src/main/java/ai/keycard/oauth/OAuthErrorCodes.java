@@ -7,8 +7,8 @@ import java.util.Set;
  *
  * <p>{@link #PERMANENT} is part of the public contract. A consumer that receives only a
  * serialized error code, after a process or workflow boundary strips the typed exception,
- * classifies by membership in this set and gets the same answer as {@link
- * OAuthErrorException#retryable()}.
+ * classifies by membership in this set. A consumer that also has the HTTP status classifies
+ * 429 and 5xx as retryable first.
  */
 public final class OAuthErrorCodes {
 

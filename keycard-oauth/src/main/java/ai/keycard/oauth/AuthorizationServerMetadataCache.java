@@ -130,22 +130,27 @@ public final class AuthorizationServerMetadataCache {
         if (endpoint != null) {
             return endpoint;
         }
+        expireMissingEndpoint(issuer, metadata);
+        throw new OAuthProtocolException(
+                "metadata for " + issuer + " has no " + field, OAuthProtocolException.INVALID_METADATA);
+    }
+
+    /** Limits reuse of the cached document when it lacks an endpoint a caller needs. */
+    void expireMissingEndpoint(URI issuer, AuthorizationServerMetadata metadata) {
         // The metadata stays cached for lookups of other fields (the keyring needs jwks_uri, a
         // token client token_endpoint), but expires within negative_ttl so a corrected document
         // is picked up as base.md requires.
         String key = key(issuer);
         Instant limit = clock.instant().plus(negativeTtl);
-        if (negativeTtl.isZero()) {
-            entries.remove(key);
-        } else {
-            entries.computeIfPresent(
-                    key,
-                    (k, entry) -> entry.metadata() != null && entry.expiresAt().isAfter(limit)
-                            ? new Entry(entry.metadata(), null, limit)
-                            : entry);
-        }
-        throw new OAuthProtocolException(
-                "metadata for " + issuer + " has no " + field, OAuthProtocolException.INVALID_METADATA);
+        entries.computeIfPresent(key, (k, entry) -> {
+            if (entry.metadata() != metadata) {
+                return entry;
+            }
+            if (negativeTtl.isZero()) {
+                return null;
+            }
+            return entry.expiresAt().isAfter(limit) ? new Entry(metadata, null, limit) : entry;
+        });
     }
 
     /**
