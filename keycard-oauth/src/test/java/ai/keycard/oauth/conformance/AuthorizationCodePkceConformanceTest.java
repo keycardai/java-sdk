@@ -103,6 +103,53 @@ class AuthorizationCodePkceConformanceTest {
     }
 
     @Test
+    @DisplayName("row 3a: preserve unrelated endpoint query parameters and replace SDK parameters")
+    void row3a() {
+        URI url = AuthorizationCodeClient.buildAuthorizeUrl(
+                URI.create("https://as.example/authorize?tenant=acme&client_id=x&client%5Fid=y#step"),
+                "sdk-client",
+                REDIRECT,
+                Pkce.generate(),
+                null,
+                List.of(),
+                List.of());
+
+        assertThat(query(url))
+                .containsEntry("tenant", List.of("acme"))
+                .containsEntry("client_id", List.of("sdk-client"));
+        assertThat(query(url).values()).allSatisfy(values -> assertThat(values).hasSize(1));
+        assertThat(url.getRawFragment()).isEqualTo("step");
+    }
+
+    @Test
+    @DisplayName("row 3b: replace inherited resources with distinct SDK resources in order")
+    void row3b() {
+        URI endpoint = URI.create("https://as.example/authorize?resource=https://old");
+        URI a = URI.create("a");
+        URI b = URI.create("b");
+        Pkce pkce = Pkce.generate();
+        for (List<URI> resources : List.of(List.of(a, b), List.of(a, b, a))) {
+            URI url = AuthorizationCodeClient.buildAuthorizeUrl(
+                    endpoint, "sdk-client", REDIRECT, pkce, null, List.of(), resources);
+            assertThat(query(url).get("resource")).containsExactly("a", "b");
+        }
+        URI url = AuthorizationCodeClient.buildAuthorizeUrl(
+                endpoint, "sdk-client", REDIRECT, pkce, null, List.of(), List.of());
+        assertThat(query(url).get("resource")).containsExactly("https://old");
+    }
+
+    @Test
+    @DisplayName("row 12: web-app begin sends one resource parameter per distinct value")
+    void row12() {
+        try (StubZone zone = zone()) {
+            URI ledger = URI.create("https://ledger.example");
+            URI crm = URI.create("https://crm.example");
+            WebAppFlow flow = client(zone).begin(REDIRECT, List.of(), List.of(ledger, crm, ledger));
+            assertThat(query(flow.url()).get("resource")).containsExactly(ledger.toString(), crm.toString());
+        }
+    }
+
+    @Test
     @DisplayName("rows 4 and 5: a public client exchanges the code with client_id in the body and no Basic")
     void rows4And5() {
         try (StubZone zone = zone()) {
