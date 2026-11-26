@@ -173,7 +173,23 @@ class KeycardStarterConformanceTest {
             assertThat(zone.requests(PATH)).isEmpty();
         };
         withIntrospectionApp(DefaultChain.class, null, valid);
-        withIntrospectionApp(DefaultChain.class, "false", true, valid);
+        withIntrospectionApp(DefaultChain.class, "false", valid);
+    }
+
+    @Test
+    @DisplayName("Spring honors a provider's introspection opt-in without a property opt-in")
+    void introspectionInheritsProviderOptIn() {
+        MvcCheck verify = (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            zone.respond("POST", PATH, 200, "{\"active\":false}");
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(401);
+            assertThat(zone.requests(PATH))
+                    .singleElement()
+                    .satisfies(
+                            call -> assertThat(call.formParams().get("token")).containsExactly(jwt));
+        };
+        withIntrospectionApp(DefaultChain.class, null, true, verify);
+        withIntrospectionApp(DefaultChain.class, "false", true, verify);
     }
 
     @Test

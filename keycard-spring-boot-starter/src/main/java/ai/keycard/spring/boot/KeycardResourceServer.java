@@ -133,8 +133,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         this.scopesSupported = List.copyOf(scopesSupported);
         this.binding = provider.resourceBinding();
         this.zoneResolver = binding.requiresZone() ? zoneResolver : null;
-        this.introspection =
-                introspect ? provider.bearerTokenIntrospection(true).orElseThrow() : null;
+        this.introspection = provider.bearerTokenIntrospection(introspect).orElse(null);
         if (introspection != null
                 && (!(decoder instanceof KeycardJwtDecoder keycardDecoder)
                         || !keycardDecoder.usesVerifier(provider.tokenVerifier()))) {
