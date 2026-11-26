@@ -1,3 +1,9 @@
+## v0.10.0 (2026-11-26)
+
+
+- feat(mcp,spring): token introspection in the bearer middleware (#46)
+- Adds opt-in introspection to RequireBearerAuthFilter and the Spring Boot starter (keycard.introspect) per bearer-token-verification-middleware spec-version 8 (spec#101, SDK-97, ID-882).
+
 ## v0.9.0 (2026-11-26)
 
 
