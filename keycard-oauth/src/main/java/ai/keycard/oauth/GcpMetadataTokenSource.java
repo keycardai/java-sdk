@@ -67,13 +67,15 @@ public final class GcpMetadataTokenSource implements IdentityTokenSource {
             throw new WorkloadIdentityRuntimeException(
                     "calling the GCP metadata server at " + identityUrl.getHost() + " failed (is this running on GCP?)",
                     WorkloadIdentityRuntimeException.SOURCE_GCP_METADATA,
-                    e);
+                    e,
+                    e.retryable());
         }
         if (response.status() != 200) {
             throw new WorkloadIdentityRuntimeException(
                     "the GCP metadata server returned HTTP " + response.status(),
                     WorkloadIdentityRuntimeException.SOURCE_GCP_METADATA,
-                    new HttpStatusException("metadata request failed", response.status(), response.body()));
+                    new HttpStatusException("metadata request failed", response.status(), response.body()),
+                    HttpStatusException.isRetryableStatus(response.status()));
         }
         String token = response.body().strip();
         if (token.isEmpty()) {

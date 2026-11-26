@@ -84,7 +84,7 @@ class WorkloadIdentityConformanceTest {
                 .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
                     assertThat(e.source()).isEqualTo("file");
                     assertThat(e.getCause()).isInstanceOf(IOException.class);
-                    assertThat(e.retryable()).isFalse();
+                    assertThat(e.retryable()).isTrue();
                 });
 
         IllegalStateException boom = new IllegalStateException("vault sealed");
@@ -97,7 +97,7 @@ class WorkloadIdentityConformanceTest {
         });
 
         WorkloadIdentityRuntimeException typed = new WorkloadIdentityRuntimeException(
-                "spire down", "spiffe", new NetworkException("x", new IOException()));
+                "spire down", "spiffe", new NetworkException("x", new IOException()), true);
         WorkloadIdentity passthrough = WorkloadIdentity.of(() -> {
             throw typed;
         });
@@ -367,6 +367,79 @@ class WorkloadIdentityConformanceTest {
             assertThat(e.getCause()).isInstanceOf(NetworkException.class);
             assertThat(e.retryable()).isTrue();
         });
+    }
+
+    @Test
+    @DisplayName("row 20: the GCP 429 is retryable regardless of the body")
+    void row20() {
+        for (String body : List.of("", "{\"error\":\"invalid_client\"}")) {
+            try (StubZone metadata = StubZone.start()) {
+                metadata.respond("GET", "/computeMetadata/v1/instance/service-accounts/default/identity", 429, body);
+                GcpMetadataTokenSource source = GcpMetadataTokenSource.builder("aud")
+                        .metadataUrl(metadata.issuer())
+                        .build();
+                assertThatThrownBy(source::identityToken)
+                        .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+                            assertThat(e.source()).isEqualTo("gcp-metadata");
+                            assertThat(e.retryable()).isTrue();
+                        });
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("rows 21 and 22: an empty or missing file is retryable only after construction")
+    void rows21And22() throws IOException {
+        for (boolean remove : List.of(false, true)) {
+            Path path = write("token");
+            FileTokenSource source = FileTokenSource.of(path);
+            if (remove) {
+                Files.delete(path);
+            } else {
+                Files.writeString(path, "");
+            }
+            assertThatThrownBy(source::identityToken)
+                    .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+                        assertThat(e.source()).isEqualTo("file");
+                        assertThat(e.retryable()).isTrue();
+                    });
+            assertThatThrownBy(() -> FileTokenSource.of(path))
+                    .isInstanceOfSatisfying(
+                            WorkloadIdentityConfigurationException.class,
+                            e -> assertThat(e.retryable()).isFalse());
+        }
+    }
+
+    @Test
+    @DisplayName("row 23: a custom failure is non-retryable even with a 429 cause")
+    void row23() {
+        for (RuntimeException cause :
+                List.of(new IllegalStateException("source failed"), new HttpStatusException("rate limited", 429, ""))) {
+            WorkloadIdentity custom = WorkloadIdentity.of(() -> {
+                throw cause;
+            });
+            assertThatThrownBy(() -> prepare(custom))
+                    .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+                        assertThat(e.source()).isEqualTo("custom");
+                        assertThat(e.getCause()).isSameAs(cause);
+                        assertThat(e.retryable()).isFalse();
+                    });
+        }
+    }
+
+    @Test
+    @DisplayName("row 24: an explicitly marked custom error passes through unchanged")
+    void row24() {
+        IOException cause = new IOException("source unavailable");
+        WorkloadIdentityRuntimeException marked =
+                new WorkloadIdentityRuntimeException("transient", "test-source", cause, true);
+        WorkloadIdentity credential = WorkloadIdentity.of(() -> {
+            throw marked;
+        });
+        assertThatThrownBy(() -> prepare(credential)).isSameAs(marked);
+        assertThat(marked.source()).isEqualTo("test-source");
+        assertThat(marked.getCause()).isSameAs(cause);
+        assertThat(marked.retryable()).isTrue();
     }
 
     private static TokenExchangeRequest prepare(WorkloadIdentity credential) {
