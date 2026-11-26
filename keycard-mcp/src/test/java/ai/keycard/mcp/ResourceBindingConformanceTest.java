@@ -173,6 +173,23 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
+    @DisplayName("a verifier with per-issuer audiences requires an explicit zone binding")
+    void perIssuerVerifierRequiresBinding() {
+        TokenVerifier verifier = AuthProvider.builder(BASE)
+                .resourceIdentifiersByZone(Map.of("a", ZONAL.get("a")))
+                .build()
+                .tokenVerifier();
+        assertThatThrownBy(() -> RequireBearerAuthFilter.builder(verifier).build())
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("per-issuer audiences require a per-zone resource binding");
+        assertThatThrownBy(() -> RequireBearerAuthFilter.builder(verifier)
+                        .zoneResolver(request -> ZONE_A)
+                        .build())
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("per-issuer audiences require a per-zone resource binding");
+    }
+
+    @Test
     @DisplayName("bearer rows 16, 16a and 16c: the request selects the zone before verification")
     void distinctZones() {
         try (TestServer server =

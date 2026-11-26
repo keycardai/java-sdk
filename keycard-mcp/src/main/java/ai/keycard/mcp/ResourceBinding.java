@@ -217,6 +217,10 @@ public final class ResourceBinding implements Serializable {
 
     void validate(TokenVerifier verifier) {
         if (isLegacy()) {
+            if (!verifier.audiencesByIssuer().isEmpty()) {
+                throw new ConfigurationException(
+                        "per-issuer audiences require a per-zone resource binding; use builder(AuthProvider) or resourceIdentifiersByZone");
+            }
             return;
         }
         Map<URI, String> perIssuer = requiresZone() ? zonalAudiences() : Map.of();
