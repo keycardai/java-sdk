@@ -157,10 +157,12 @@ public final class AuthorizationServerDiscovery {
                 optionalUri(issuer, document, "end_session_endpoint"),
                 optionalUri(issuer, document, "device_authorization_endpoint"),
                 optionalUri(issuer, document, "revocation_endpoint"),
+                optionalUri(issuer, document, "introspection_endpoint"),
                 stringList(issuer, document, "grant_types_supported"),
                 stringList(issuer, document, "token_endpoint_auth_methods_supported"),
                 stringList(issuer, document, "response_types_supported"),
                 stringList(issuer, document, "revocation_endpoint_auth_methods_supported"),
+                stringList(issuer, document, "introspection_endpoint_auth_methods_supported"),
                 document);
     }
 

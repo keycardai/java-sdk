@@ -1,10 +1,10 @@
 # keycard-oauth
 
 OAuth 2.0 for Keycard zones: token exchange (RFC 8693), client credentials, authorization code
-with PKCE and refresh, token revocation (RFC 7009), the device authorization grant (RFC 8628),
-dynamic client registration (RFC 7591), discovery (RFC 8414), UserInfo, JWT signing and verification with a cached JWKS
-keyring, and the `AccessContext` that holds per-resource results. Its only runtime dependency
-is Nimbus JOSE + JWT.
+with PKCE and refresh, token revocation (RFC 7009), token introspection (RFC 7662), the device
+authorization grant (RFC 8628), dynamic client registration (RFC 7591), discovery (RFC 8414),
+UserInfo, JWT signing and verification with a cached JWKS keyring, and the `AccessContext` that
+holds per-resource results. Its only runtime dependency is Nimbus JOSE + JWT.
 
 ```kotlin
 implementation("ai.keycard:keycard-oauth:0.1.0")
@@ -67,6 +67,20 @@ revocation.revokeToken(refreshToken);
 Revoking a Keycard refresh token revokes its session. The client discovers the zone over HTTPS
 and requires an HTTPS revocation endpoint. Pass already discovered metadata to `builder(metadata)`
 to skip discovery.
+
+## Introspect a token
+
+```java
+TokenIntrospectionClient introspection = TokenIntrospectionClient.builder(zone)
+        .credential(ClientSecret.of(clientId, clientSecret))
+        .build();
+TokenIntrospection result = introspection.introspectToken(accessToken);
+```
+
+An inactive token returns a `TokenIntrospection` with `active() == false` rather than throwing.
+The client discovers the zone over HTTPS, requires an HTTPS introspection endpoint, and never
+caches introspection results. Pass already discovered metadata to `builder(metadata)` to skip
+discovery.
 
 ## Errors
 
