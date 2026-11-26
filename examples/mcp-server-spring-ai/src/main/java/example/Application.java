@@ -14,6 +14,7 @@ import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -103,7 +104,8 @@ public class Application {
 
     /** One line per resource: the issued token's claims, or why the exchange failed. Never a token. */
     private static CallToolResult downstream(AuthProvider keycard, Jwt caller, List<String> resources) {
-        AccessContext access = keycard.exchangeTokens(caller.getTokenValue(), resources.toArray(String[]::new));
+        AccessContext access = keycard.exchangeTokensForZone(
+                URI.create(caller.getClaimAsString("iss")), caller.getTokenValue(), resources.toArray(String[]::new));
         StringBuilder report = new StringBuilder();
         for (String resource : resources) {
             report.append(resource).append(": ");

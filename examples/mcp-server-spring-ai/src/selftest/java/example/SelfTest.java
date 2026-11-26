@@ -1,5 +1,6 @@
 package example;
 
+import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
 import ai.keycard.oauth.testing.StubZone;
@@ -32,7 +33,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 
 /**
- * Hermetic end-to-end proof: a stub zone (real RSA key, discovery, JWKS and a token endpoint),
+ * Hermetic end-to-end proof: stub zones (real RSA key, discovery, JWKS and a token endpoint),
  * this Spring AI app against it, and the MCP SDK's own client calling both tools through Spring
  * Security and the starter. No network, no live zone.
  */
@@ -47,9 +48,10 @@ public final class SelfTest {
 
     public static void main(String[] args) throws Exception {
         RSAKey key = new RSAKeyGenerator(2048).keyID("kid-selftest").generate();
-        try (StubZone zone = StubZone.start().serveDiscovery()) {
-            zone.respond("GET", StubZone.JWKS_PATH, 200, new JWKSet(key.toPublicJWK()).toString());
-            zone.respondWith("POST", StubZone.TOKEN_PATH, request -> request.formParams()
+        try (StubZone baseZone = StubZone.start().serveDiscovery();
+                StubZone callerZone = StubZone.start().serveDiscovery()) {
+            callerZone.respond("GET", StubZone.JWKS_PATH, 200, new JWKSet(key.toPublicJWK()).toString());
+            callerZone.respondWith("POST", StubZone.TOKEN_PATH, request -> request.formParams()
                             .get("resource")
                             .contains(DENIED)
                     ? StubResponse.json(400, "{\"error\":\"invalid_target\"}")
@@ -58,37 +60,40 @@ public final class SelfTest {
                             "{\"access_token\":\"" + unsigned(Map.of("sub", "usr_selftest", "aud", DOWNSTREAM))
                                     + "\",\"token_type\":\"Bearer\"}"));
             String resourceId = "http://127.0.0.1/mcp";
-            try (ConfigurableApplicationContext app = SpringApplication.run(
-                    Application.class,
+            SpringApplication application = new SpringApplication(Application.class);
+            application.addInitializers(context -> context.getBeanFactory().registerSingleton(
+                    "selftestCredential",
+                    ClientSecret.perZone(Map.of(
+                            baseZone.issuer(), ClientSecret.of("base", "secret"),
+                            callerZone.issuer(), ClientSecret.of("caller", "secret")))));
+            try (ConfigurableApplicationContext app = application.run(
                     "--server.port=0",
-                    "--keycard.zone-url=" + zone.issuer(),
+                    "--keycard.zone-url=" + baseZone.issuer(),
                     "--keycard.audiences=" + resourceId,
-                    "--keycard.client-id=cid",
-                    "--keycard.client-secret=csecret",
                     "--keycard.scopes-supported=mcp:tools",
                     "--downstream.resources=" + DOWNSTREAM + "," + DENIED)) {
                 URI base = URI.create("http://127.0.0.1:" + app.getEnvironment().getProperty("local.server.port"));
-                run(base, zone, sign(key, zone, resourceId));
+                run(base, baseZone, callerZone, sign(key, callerZone, resourceId));
             }
         }
         System.out.println(FAILURES.isEmpty() ? "selftest passed" : "selftest FAILED: " + FAILURES);
         System.exit(FAILURES.isEmpty() ? 0 : 1);
     }
 
-    private static void run(URI base, StubZone zone, String caller) throws Exception {
+    private static void run(URI base, StubZone baseZone, StubZone callerZone, String caller) throws Exception {
         HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
         System.out.println("contract checks (Spring Security + keycard-spring-boot-starter):");
         HttpResponse<String> prm = http.send(
                 HttpRequest.newBuilder(base.resolve("/.well-known/oauth-protected-resource/mcp")).build(),
                 HttpResponse.BodyHandlers.ofString());
         check("protected-resource metadata names the zone", () -> prm.statusCode() == 200
-                && prm.body().contains(zone.issuer().toString())
+                && prm.body().contains(baseZone.issuer().toString())
                 && prm.body().contains(base + "/mcp"));
         HttpResponse<String> as = http.send(
                 HttpRequest.newBuilder(base.resolve("/.well-known/oauth-authorization-server")).build(),
                 HttpResponse.BodyHandlers.ofString());
         check("AS metadata proxied unmodified", () -> as.statusCode() == 200
-                && as.body().contains(zone.url(StubZone.TOKEN_PATH).toString()));
+                && as.body().contains(baseZone.url(StubZone.TOKEN_PATH).toString()));
         HttpResponse<String> bare = http.send(
                 HttpRequest.newBuilder(base.resolve("/mcp"))
                         .header("Content-Type", "application/json")
@@ -123,8 +128,11 @@ public final class SelfTest {
                     () -> report.contains(DENIED + ": failed (invalid_target)")
                             && !Boolean.TRUE.equals(downstream.isError()));
             check("the exchange sent the caller's token as the subject",
-                    () -> zone.requests(StubZone.TOKEN_PATH).stream()
+                    () -> callerZone.requests(StubZone.TOKEN_PATH).stream()
                             .allMatch(r -> r.formParams().get("subject_token").equals(List.of(caller))));
+            check("the exchange sent both requests to the caller's issuer, not the configured base",
+                    () -> callerZone.requests(StubZone.TOKEN_PATH).size() == 2
+                            && baseZone.requests(StubZone.TOKEN_PATH).isEmpty());
         } finally {
             client.closeGracefully();
         }
