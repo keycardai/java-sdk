@@ -11,11 +11,12 @@ import org.jspecify.annotations.Nullable;
 /**
  * A token introspection response (RFC 7662).
  *
- * <p>An inactive token is a valid result with {@code active == false} and absent optional fields.
- * An active result carries every claim of the verified token: the standard fields are typed below,
- * and all claims (including unknown claims such as {@code act}, {@code sub_profile}, {@code
- * auth_time}, or {@code keycard_app_id}) remain accessible through {@link #raw()} and {@link
- * #get(String)}.
+ * <p>An inactive token is a valid result with only {@code active == false}: all other typed
+ * fields are absent ({@code null} or empty) and {@link #raw()} contains only {@code active: false},
+ * even if the server included additional members in the response. An active result carries every
+ * claim of the verified token: the standard fields are typed below, and all claims (including
+ * unknown claims such as {@code act}, {@code sub_profile}, {@code auth_time}, or {@code
+ * keycard_app_id}) remain accessible through {@link #raw()} and {@link #get(String)}.
  *
  * @param active whether the token is active, as seen by the calling client
  * @param tokenType the token type, such as {@code Bearer} for an active access token; {@code null}

@@ -176,6 +176,37 @@ class TokenIntrospectionConformanceTest {
     }
 
     @Test
+    @DisplayName("inactive response ignores extra and mistyped fields and returns only active false")
+    void inactiveResponseDropsExtraAndMistypedFields() {
+        try (StubZone zone = zone()) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("active", false);
+            body.put("exp", "x");
+            body.put("sub", "user-123");
+            body.put("scope", 123);
+            body.put("aud", 456);
+            body.put("custom_claim", "value");
+            zone.respond("POST", INTROSPECT_PATH, 200, JSONObjectUtils.toJSONString(body));
+
+            TokenIntrospection result = client(zone).introspectToken("inactive-token");
+
+            assertThat(result.active()).isFalse();
+            assertThat(result.tokenType()).isNull();
+            assertThat(result.iss()).isNull();
+            assertThat(result.sub()).isNull();
+            assertThat(result.clientId()).isNull();
+            assertThat(result.aud()).isEmpty();
+            assertThat(result.scope()).isEmpty();
+            assertThat(result.sid()).isNull();
+            assertThat(result.jti()).isNull();
+            assertThat(result.iat()).isNull();
+            assertThat(result.exp()).isNull();
+            assertThat(result.get("custom_claim")).isNull();
+            assertThat(result.raw()).containsExactlyEntriesOf(Map.of("active", false));
+        }
+    }
+
+    @Test
     @DisplayName("row 5: metadata without introspection endpoint fails without a fallback request")
     void row5() {
         try (StubZone zone = StubZone.start()) {

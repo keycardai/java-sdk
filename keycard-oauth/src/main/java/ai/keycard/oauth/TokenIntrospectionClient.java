@@ -149,6 +149,21 @@ public final class TokenIntrospectionClient {
         if (!(activeValue instanceof Boolean active)) {
             throw invalid("token introspection response has no boolean active");
         }
+        if (!active) {
+            return new TokenIntrospection(
+                    false,
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of(),
+                    List.of(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    Map.of("active", false));
+        }
         return new TokenIntrospection(
                 active,
                 optionalString(document, "token_type"),
