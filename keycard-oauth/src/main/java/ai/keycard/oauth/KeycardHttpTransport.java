@@ -46,6 +46,19 @@ public interface KeycardHttpTransport {
     }
 
     /**
+     * Sends one request with a decoded byte limit on the SDK's JDK transport.
+     * Other implementations can apply their own transport policy.
+     *
+     * @param request the request
+     * @param maxResponseBodyBytes the positive decoded byte limit
+     * @return the response, whatever its status
+     * @throws ResponseBodyTooLargeException if the SDK transport exceeds the limit
+     */
+    default TransportResponse sendWithLimit(TransportRequest request, int maxResponseBodyBytes) {
+        return sendUnbounded(request);
+    }
+
+    /**
      * The default transport: a JDK {@link HttpClient} that follows no redirects and connects
      * within {@link #DEFAULT_TIMEOUT}.
      *

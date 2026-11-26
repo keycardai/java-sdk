@@ -45,10 +45,18 @@ final class JdkHttpTransport implements KeycardHttpTransport {
 
     @Override
     public TransportResponse sendUnbounded(TransportRequest request) {
-        return sendWithLimit(request, -1);
+        return exchange(request, -1);
     }
 
-    private TransportResponse sendWithLimit(TransportRequest request, int limit) {
+    @Override
+    public TransportResponse sendWithLimit(TransportRequest request, int maxResponseBodyBytes) {
+        if (maxResponseBodyBytes <= 0) {
+            throw new IllegalArgumentException("response limit must be positive");
+        }
+        return exchange(request, maxResponseBodyBytes);
+    }
+
+    private TransportResponse exchange(TransportRequest request, int limit) {
         HttpRequest httpRequest = toHttpRequest(request);
         String host = request.uri().getHost();
         AtomicReference<InputStream> bodyStream = new AtomicReference<>();
@@ -140,7 +148,7 @@ final class JdkHttpTransport implements KeycardHttpTransport {
             throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
-        int total = 0;
+        long total = 0;
         int n;
         while ((n = in.read(buffer)) != -1) {
             total += n;

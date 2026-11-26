@@ -4,6 +4,7 @@ import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.KeycardHttpTransport;
+import ai.keycard.oauth.ResponseBodyTooLargeException;
 import ai.keycard.oauth.TokenExchangeClient;
 import ai.keycard.oauth.TransportRequest;
 import ai.keycard.oauth.TransportResponse;
@@ -48,24 +49,27 @@ public final class DelegationClient {
     private final TokenExchangeClient exchange;
     private final ServiceDiscovery discovery;
     private final KeycardHttpTransport transport;
+    private final int maxPeerResponseBytes;
     private final Duration invokeTimeout;
     private final Wire wire;
     private final Set<String> trustedOrigins;
 
     private DelegationClient(Builder builder) {
+        this.transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
+        this.maxPeerResponseBytes = builder.maxPeerResponseBytes;
         this.wire = Wire.of(builder.protocolVersion);
         this.exchange = TokenExchangeClient.builder(builder.issuer)
                 .credential(Objects.requireNonNull(builder.credential, "credential"))
-                .transport(builder.transport)
+                .transport(transport)
                 .fetchTimeout(builder.fetchTimeout)
                 .build();
         this.discovery = builder.discovery != null
                 ? builder.discovery
                 : ServiceDiscovery.builder()
-                        .transport(builder.transport)
+                        .transport(transport)
+                        .maxPeerResponseBytes(maxPeerResponseBytes)
                         .fetchTimeout(builder.fetchTimeout)
                         .build();
-        this.transport = builder.transport;
         this.invokeTimeout = builder.invokeTimeout;
         this.trustedOrigins = Set.copyOf(builder.trustedOrigins);
     }
@@ -93,6 +97,7 @@ public final class DelegationClient {
      *     isn't called
      * @throws A2aInvocationException when the call fails or the target answers with a JSON-RPC
      *     error
+     * @throws ResponseBodyTooLargeException when a decoded peer reply exceeds the peer response limit
      * @throws KeycardException for other exchange failures
      */
     public DelegationResult invoke(URI target, String subjectToken, Map<String, Object> params) {
@@ -168,7 +173,9 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = transport.sendUnbounded(request);
+            response = transport.sendWithLimit(request, maxPeerResponseBytes);
+        } catch (ResponseBodyTooLargeException e) {
+            throw e.status() >= 200 && e.status() < 300 ? e.nonRetryable() : e;
         } catch (KeycardException e) {
             throw new A2aInvocationException(
                     "invocation of " + url + " failed: " + e.getMessage(), e, e.retryable(), 0, null);
@@ -229,7 +236,8 @@ public final class DelegationClient {
 
         private final URI issuer;
         private @Nullable Credential credential;
-        private KeycardHttpTransport transport = KeycardHttpTransport.create();
+        private @Nullable KeycardHttpTransport transport;
+        private int maxPeerResponseBytes = ServiceDiscovery.DEFAULT_MAX_PEER_RESPONSE_BYTES;
         private Duration fetchTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private Duration invokeTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private @Nullable ServiceDiscovery discovery;
@@ -271,6 +279,23 @@ public final class DelegationClient {
          */
         public Builder httpClient(HttpClient client) {
             return transport(KeycardHttpTransport.of(client));
+        }
+
+        /**
+         * Sets the decoded peer reply limit, which defaults to 64 MiB. The SDK's JDK transport
+         * enforces it, including one built with {@link #httpClient}; another transport applies its
+         * own policy. This does not change the token exchange limit.
+         *
+         * @param maxPeerResponseBytes a positive byte limit
+         * @return this builder
+         * @throws IllegalArgumentException if the limit is not positive
+         */
+        public Builder maxPeerResponseBytes(int maxPeerResponseBytes) {
+            if (maxPeerResponseBytes <= 0) {
+                throw new IllegalArgumentException("maxPeerResponseBytes must be positive");
+            }
+            this.maxPeerResponseBytes = maxPeerResponseBytes;
+            return this;
         }
 
         /**
