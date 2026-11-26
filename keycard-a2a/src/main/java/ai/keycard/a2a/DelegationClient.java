@@ -49,14 +49,12 @@ public final class DelegationClient {
     private final TokenExchangeClient exchange;
     private final ServiceDiscovery discovery;
     private final KeycardHttpTransport transport;
-    private final boolean defaultTransport;
     private final int maxPeerResponseBytes;
     private final Duration invokeTimeout;
     private final Wire wire;
     private final Set<String> trustedOrigins;
 
     private DelegationClient(Builder builder) {
-        this.defaultTransport = builder.transport == null;
         this.transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
         this.maxPeerResponseBytes = builder.maxPeerResponseBytes;
         this.wire = Wire.of(builder.protocolVersion);
@@ -68,10 +66,8 @@ public final class DelegationClient {
         this.discovery = builder.discovery != null
                 ? builder.discovery
                 : ServiceDiscovery.builder()
-                        .transport(
-                                defaultTransport
-                                        ? request -> transport.sendWithLimit(request, maxPeerResponseBytes)
-                                        : transport)
+                        .transport(transport)
+                        .maxPeerResponseBytes(maxPeerResponseBytes)
                         .fetchTimeout(builder.fetchTimeout)
                         .build();
         this.invokeTimeout = builder.invokeTimeout;
@@ -177,9 +173,7 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = defaultTransport
-                    ? transport.sendWithLimit(request, maxPeerResponseBytes)
-                    : transport.sendUnbounded(request);
+            response = transport.sendWithLimit(request, maxPeerResponseBytes);
         } catch (ResponseBodyTooLargeException e) {
             throw e.status() >= 200 && e.status() < 300 ? e.nonRetryable() : e;
         } catch (KeycardException e) {
@@ -288,8 +282,9 @@ public final class DelegationClient {
         }
 
         /**
-         * Sets the default transport's decoded peer reply limit, which defaults to 64 MiB.
-         * This does not change the token exchange limit.
+         * Sets the decoded peer reply limit, which defaults to 64 MiB. The SDK's JDK transport
+         * enforces it, including one built with {@link #httpClient}; another transport applies its
+         * own policy. This does not change the token exchange limit.
          *
          * @param maxPeerResponseBytes a positive byte limit
          * @return this builder

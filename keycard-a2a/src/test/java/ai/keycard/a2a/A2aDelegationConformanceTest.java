@@ -18,6 +18,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -366,6 +367,36 @@ class A2aDelegationConformanceTest {
             } finally {
                 rpcPeer.stop(0);
             }
+        }
+    }
+
+    @Test
+    @DisplayName("a JDK transport built with httpClient keeps the peer limit")
+    void httpClientKeepsPeerLimit() {
+        String padding = " ".repeat(1024);
+        try (StubZone zone = zone();
+                StubZone agent = agent(CARD + padding)) {
+            agent.respond("POST", A2aProtocol.JSONRPC_PATH, 200, REPLY + padding);
+            assertOverflow(
+                    () -> ServiceDiscovery.builder()
+                            .httpClient(HttpClient.newHttpClient())
+                            .maxPeerResponseBytes(512)
+                            .build()
+                            .getCard(agent.issuer()),
+                    200,
+                    512,
+                    true);
+            agent.respond("GET", A2aProtocol.AGENT_CARD_PATH, 200, CARD);
+            assertOverflow(
+                    () -> invoke(
+                            clientBuilder(zone)
+                                    .httpClient(HttpClient.newHttpClient())
+                                    .maxPeerResponseBytes(512)
+                                    .build(),
+                            agent.issuer()),
+                    200,
+                    512,
+                    false);
         }
     }
 

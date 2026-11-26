@@ -39,13 +39,9 @@ public final class ServiceDiscovery {
     private final Map<String, Entry> cards = new ConcurrentHashMap<>();
 
     private ServiceDiscovery(Builder builder) {
-        if (builder.transport != null) {
-            this.transport = builder.transport;
-        } else {
-            KeycardHttpTransport defaultTransport = KeycardHttpTransport.create();
-            int limit = builder.maxPeerResponseBytes;
-            this.transport = request -> defaultTransport.sendWithLimit(request, limit);
-        }
+        KeycardHttpTransport base = builder.transport != null ? builder.transport : KeycardHttpTransport.create();
+        int limit = builder.maxPeerResponseBytes;
+        this.transport = request -> base.sendWithLimit(request, limit);
         this.fetchTimeout = builder.fetchTimeout;
         this.cacheTtl = builder.cacheTtl;
         this.clock = builder.clock;
@@ -175,7 +171,9 @@ public final class ServiceDiscovery {
         }
 
         /**
-         * Sets the default transport's decoded agent card limit, which defaults to 64 MiB.
+         * Sets the decoded agent card limit, which defaults to 64 MiB. The SDK's JDK transport
+         * enforces it, including one built with {@link #httpClient}; another transport applies its
+         * own policy.
          *
          * @param maxPeerResponseBytes a positive byte limit
          * @return this builder
