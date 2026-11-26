@@ -1,3 +1,15 @@
+## v0.8.1 (2026-11-26)
+
+
+- fix(oauth): attach KEYCARD_CLIENT_ID to a discovered web identity credential (#41)
+- * fix(oauth): attach KEYCARD_CLIENT_ID to a discovered web identity credential
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * docs: update credential discovery conformance counts for rows 23 and 24
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.8.0 (2026-11-26)
 
 
