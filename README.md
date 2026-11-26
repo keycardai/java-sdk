@@ -68,13 +68,14 @@ depend on it. `keycard-spiffe` is separate because the SPIFFE client pulls in gR
 
 | Example | Shows |
 | --- | --- |
-| [engine-obo](examples/engine-obo) | A workload authenticated by a SPIFFE JWT-SVID exchanging a user's token, actor chains, the device grant, WebIdentity, and the core live rows |
 | [mcp-server-servlet](examples/mcp-server-servlet) | An MCP server on the official MCP Java SDK behind `keycard-mcp` |
 | [mcp-server-spring-ai](examples/mcp-server-spring-ai) | A Spring AI 2.0 MCP server behind the Spring Boot starter |
 | [a2a-delegation](examples/a2a-delegation) | Agent A delegating to agent B, which runs on the official a2a-java codec |
 
-Each has a `bin/selftest` that needs no zone, or a live run against one.
-`examples/live-e2e` runs every live suite against a sandbox zone.
+Each has a `bin/selftest` that needs no zone, and CI runs them. Live coverage against a real
+zone is the weekly Template Eval in [keycardai/templates](https://github.com/keycardai/templates)
+(`mcp-server-java`, `a2a-delegation-java`); the
+[conformance report](docs/conformance-report.md) lists which live rows it covers.
 
 ## Building
 

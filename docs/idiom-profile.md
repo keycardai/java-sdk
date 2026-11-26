@@ -60,7 +60,7 @@ java-sdk/
   keycard-spring-boot-starter/   package ai.keycard.spring.boot
   keycard-a2a/
   keycard-bom/
-  examples/                 engine-obo/, mcp-server-servlet/, mcp-server-spring-ai/, a2a-delegation/
+  examples/                 mcp-server-servlet/, mcp-server-spring-ai/, a2a-delegation/
                             (each a separate Gradle build using includeBuild("../.."))
   docs/                     idiom-profile.md, conformance-report.md, releasing.md, launch-checklist.md
   scripts/                  changelog.py, bump_package.py (ported from ruby-sdk)

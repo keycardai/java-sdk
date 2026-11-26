@@ -11,7 +11,7 @@ section.
 | Modules | `keycard-oauth`, `keycard-spiffe`, `keycard-mcp`, `keycard-a2a`, `keycard-spring-boot-starter` |
 | Capability specs covered | 21 of 24; 2 excluded on purpose, `delegated-access/as-itself` waits on the demand-gated agent integrations |
 | Unit tests | 310, in 28 suites; 25 are conformance suites mapped to spec Testing tables or the framework checklist |
-| Live-zone rows | 42 passing, 5 failing on zone behavior that differs from the spec, 7 not run (listed below) |
+| Live-zone rows | 42 passing, 5 failing on zone behavior that differs from the spec, 7 not run, on November 11, 2026; the weekly Template Eval in keycardai/templates carries the MCP and A2A rows (listed below) |
 | Example selftests | 3 in CI, with no zone: an MCP Java SDK servlet server (12 checks), a Spring AI MCP server (9), and A2A delegation with agent B on a2a-java (10) |
 | Java versions | 17, 21 and 25 in CI; bytecode is `--release 17` |
 | Checks | `-Xlint:all -Werror`, Javadoc `-Xdoclint:all -Werror`, Spotless (Palantir) |
@@ -73,10 +73,33 @@ rows, such as construction errors and Java-specific edges, named without a row n
 
 ## Live-zone results
 
-`examples/live-e2e` runs every non-interactive live suite against one sandbox zone. The
-interactive device rows run through `examples/engine-obo/bin/device-e2e confirm` and `deny`.
-The engine application authenticates with a v2 token credential and SPIRE JWT-SVIDs unless a
-row says otherwise; the subject token is a real user's, from the loopback sign-in.
+Live coverage runs in the Template Eval in
+[keycardai/templates](https://github.com/keycardai/templates), weekly against the shared eval
+zone. Two Java templates carry the rows that fit a headless run there:
+
+| Template | Rows it covers |
+| --- | --- |
+| `mcp-server-java` | bearer-token-verification-middleware 1 and 2, oauth-metadata-endpoints 1 and 2, authorization-server-discovery 1, jwks-caching 1 (browser sign-in through the zone) |
+| `a2a-delegation-java` | a2a-delegation 1, token-exchange 1, client-secret 1 (a user token exchanged for the target; the target sees the user as `sub` and the caller in `act`) |
+
+The rest need a person, a SPIRE server, a public tunnel or a zone setting the eval zone doesn't
+have, so they are manual checks: run by hand against a sandbox zone when the code behind them
+changes, with the result recorded here. The drivers that ran them are in this repository's
+history at `v0.9.0` (`examples/engine-obo`, `examples/live-e2e`).
+
+| Rows | Status | Why |
+| --- | --- | --- |
+| device-authorization 1 (confirm) and the denial path | manual | A person approves or denies the code |
+| device-authorization 4 to 7 | manual | Run as the SPIFFE-authenticated engine; 7 needs WebIdentity |
+| web-identity 1 and 2, jwt-signing-and-verification 1 | manual | The zone fetches the key set through a `cloudflared` quick tunnel |
+| workload-identity 1 and 2, token-exchange actor rows (spec#104) | manual | A SPIRE server mints the JWT-SVIDs; the Workload API row also runs a SPIRE agent |
+| client-credentials, token-exchange 2 and 3, impersonation, userinfo 2, credential-discovery, dynamic-client-registration | manual | Need the engine's credentials and registrations in a sandbox zone; the unit conformance suites cover the SDK side against `StubZone` |
+| access-context / grant-decorator 1 and 2 (servlet and Spring) | manual | Need a second registered resource and a dependency the eval doesn't provision; the example selftests cover them against a stub zone |
+| a2a-delegation 2 | not run | Fails in every SDK until the A2A path sends actor tokens (finding 5) |
+
+The results below are from the last full run on November 11, 2026. The engine application
+authenticated with a v2 token credential and SPIRE JWT-SVIDs unless a row says otherwise; the
+subject token was a real user's, from the loopback sign-in.
 
 | Spec | Row | Result |
 | --- | --- | --- |
@@ -172,10 +195,7 @@ client authentication.
 examples/mcp-server-servlet/bin/selftest         # no zone needed
 examples/mcp-server-spring-ai/bin/selftest
 examples/a2a-delegation/bin/selftest
-
-export KEYCARD_ZONE_URL=https://<zone-id>.keycard.cloud LIVE_DIR=/path/outside/the/repo
-export ZONE_ID=<zone-id> ORG_ID=<org-id>
-examples/engine-obo/bin/sign-in                  # once, in a browser
-examples/live-e2e                                # every non-interactive live suite
-examples/engine-obo/bin/device-e2e confirm       # needs a person to approve a code
 ```
+
+Live rows run in keycardai/templates: `npx tsx index.ts --template mcp-server-java` and
+`--template a2a-delegation-java` from its `eval/` directory, or the Template Eval workflow.

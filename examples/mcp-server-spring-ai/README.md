@@ -36,10 +36,9 @@ environment variables.
   checks the contract (protected-resource metadata, the proxied authorization-server metadata,
   401 with `resource_metadata` on a bare POST), then drives both tools with the MCP SDK's client,
   with one downstream resource exchanging and one refused.
-- `bin/live-e2e` runs against a live zone, reusing the [engine-obo](../engine-obo) provisioning:
-  the app runs as the engine (v2 workload credential, SPIRE JWT-SVID), the signed-in user's token
-  calls it, and `downstream` gets a ledger token with the engine in `act` and `invalid_target`
-  for a resource registered nowhere.
+- Live coverage of the bearer contract against a real zone is the `mcp-server-java` template in
+  [keycardai/templates](https://github.com/keycardai/templates), which the weekly Template Eval
+  runs. The starter itself has no template yet.
 
 ## FRAMEWORK-INTEGRATIONS checklist
 
