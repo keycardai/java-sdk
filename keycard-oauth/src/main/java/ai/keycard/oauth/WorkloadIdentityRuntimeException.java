@@ -6,8 +6,8 @@ import org.jspecify.annotations.Nullable;
  * A workload-identity token source failed at request time: the token file is unreadable or
  * empty, the metadata endpoint is unreachable or answered non-200, or a custom source threw.
  *
- * <p>Retryable when the underlying cause is a retryable {@link KeycardException}, such as a
- * {@link NetworkException} reaching a metadata server; otherwise not.
+ * <p>Retryability is either specified explicitly or inherited from a retryable
+ * {@link KeycardException} cause.
  */
 public class WorkloadIdentityRuntimeException extends KeycardException {
 
@@ -26,14 +26,14 @@ public class WorkloadIdentityRuntimeException extends KeycardException {
     private final String source;
 
     /**
-     * Creates a non-retryable exception.
+     * Creates an exception that inherits retryability from a {@link KeycardException} cause.
      *
      * @param message what failed
      * @param source the source identifier, such as {@link #SOURCE_FILE}
      * @param cause the underlying failure, or {@code null}
      */
     public WorkloadIdentityRuntimeException(String message, String source, @Nullable Throwable cause) {
-        this(message, source, cause, false);
+        this(message, source, cause, cause instanceof KeycardException keycard && keycard.retryable());
     }
 
     /**

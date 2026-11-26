@@ -3,6 +3,7 @@ package ai.keycard.oauth.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.TokenExchangeClient;
 import ai.keycard.oauth.TokenExchangeRequest;
 import ai.keycard.oauth.TokenTypes;
@@ -79,6 +80,28 @@ class ActorTokenSourceTest {
                     .isInstanceOfSatisfying(
                             WorkloadIdentityRuntimeException.class,
                             e -> assertThat(e.source()).isEqualTo("custom"));
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("row 26: an unmarked actor source 429 is non-retryable")
+    void actorFailureWithRetryableCause() {
+        try (StubZone zone = zone()) {
+            HttpStatusException cause = new HttpStatusException("rate limited", 429, "");
+            TokenExchangeClient client = TokenExchangeClient.builder(zone.issuer())
+                    .credential(WorkloadIdentity.of(() -> "svid"))
+                    .actor(() -> {
+                        throw cause;
+                    })
+                    .build();
+
+            assertThatThrownBy(() -> client.exchangeToken("user-token", RESOURCE))
+                    .isInstanceOfSatisfying(WorkloadIdentityRuntimeException.class, e -> {
+                        assertThat(e.source()).isEqualTo("custom");
+                        assertThat(e.getCause()).isSameAs(cause);
+                        assertThat(e.retryable()).isFalse();
+                    });
             assertThat(zone.requests(StubZone.TOKEN_PATH)).isEmpty();
         }
     }
