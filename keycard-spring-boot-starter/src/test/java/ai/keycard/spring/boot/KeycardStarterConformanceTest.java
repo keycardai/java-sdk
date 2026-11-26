@@ -33,6 +33,8 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -43,6 +45,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -106,6 +109,32 @@ class KeycardStarterConformanceTest {
             assertThat(response.getHeader("WWW-Authenticate")).isNull();
             assertThat(response.getContentAsString()).isEqualTo("{\"error\":\"temporarily_unavailable\"}");
             assertThat(zone.requests(PATH)).hasSize(1);
+        });
+    }
+
+    @Test
+    @DisplayName("introspection preserves the chain's custom JWT authority converter")
+    void introspectionWithCustomJwtConverter() {
+        withIntrospectionApp(CustomJwtChain.class, "true", (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            zone.respond("POST", PATH, StubResponse.json(200, "{\"active\":true}"));
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(200);
+            Map<Integer, StubResponse> rejections = Map.of(
+                    401, StubResponse.json(200, "{\"active\":false}"),
+                    503, StubResponse.json(500, "{\"error\":\"server_error\"}"));
+            for (var rejection : rejections.entrySet()) {
+                zone.respond("POST", PATH, rejection.getValue());
+                var session = new MockHttpSession();
+                var result = mvc.perform(get("/me").session(session).header("Authorization", "Bearer " + jwt))
+                        .andReturn();
+                assertThat(result.getResponse().getStatus()).isEqualTo(rejection.getKey());
+                assertThat(mvc.perform(get("/me").session(session))
+                                .andReturn()
+                                .getResponse()
+                                .getStatus())
+                        .isEqualTo(401);
+            }
+            assertThat(zone.requests(PATH)).hasSize(3);
         });
     }
 
@@ -597,6 +626,24 @@ class KeycardStarterConformanceTest {
         @Bean
         SecurityFilterChain scoped(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
             return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_admin"))
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class CustomJwtChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain customJwt(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("custom"))
+                    .securityContext(context -> context.requireExplicitSave(false)
+                            .securityContextRepository(new HttpSessionSecurityContextRepository()))
+                    .oauth2ResourceServer(server -> server.jwt(jwt ->
+                            jwt.jwtAuthenticationConverter(decoded -> UsernamePasswordAuthenticationToken.authenticated(
+                                    decoded, null, List.of(new SimpleGrantedAuthority("custom"))))))
                     .with(keycard, Customizer.withDefaults())
                     .build();
         }

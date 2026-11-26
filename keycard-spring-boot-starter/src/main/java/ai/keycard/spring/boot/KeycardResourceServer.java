@@ -23,6 +23,7 @@ import org.springframework.security.authentication.AuthenticationServiceExceptio
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,6 +32,7 @@ import org.springframework.security.oauth2.server.resource.BearerTokenError;
 import org.springframework.security.oauth2.server.resource.BearerTokenErrors;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -87,6 +89,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
     private final @Nullable BearerTokenIntrospection introspection;
     private static final String PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
     private static final String VERIFIED_BEARER_ATTRIBUTE = KeycardResourceServer.class.getName() + ".verifiedBearer";
+    private static final String PRESENT_BEARER_ATTRIBUTE = KeycardResourceServer.class.getName() + ".presentBearer";
 
     /**
      * A configurer for one zone.
@@ -166,9 +169,17 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         }
         AuthenticationEntryPoint challenge = challenge(binding, zoneResolver);
         BearerTokenAccessDeniedHandler denied = new BearerTokenAccessDeniedHandler();
+        BearerTokenIntrospection check = introspection;
+        StrictBearerTokenResolver bearerResolver = new StrictBearerTokenResolver();
         http.oauth2ResourceServer(resourceServer -> {
             resourceServer
-                    .bearerTokenResolver(new StrictBearerTokenResolver())
+                    .bearerTokenResolver(request -> {
+                        String token = bearerResolver.resolve(request);
+                        if (check != null && token != null) {
+                            request.setAttribute(PRESENT_BEARER_ATTRIBUTE, token);
+                        }
+                        return token;
+                    })
                     .authenticationEntryPoint(challenge)
                     .accessDeniedHandler(
                             binding == null || binding.isLegacy()
@@ -185,25 +196,21 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                         }
                     });
             ZoneResolver resolver = zoneResolver;
-            if (resolver == null && introspection == null) {
+            if (resolver == null) {
                 resourceServer.jwt(jwt -> jwt.decoder(decoder));
             } else {
                 JwtAuthenticationConverter converter = http.getSharedObject(ApplicationContext.class)
                         .getBeanProvider(JwtAuthenticationConverter.class)
                         .getIfAvailable(JwtAuthenticationConverter::new);
                 resourceServer.authenticationManagerResolver(request -> authentication -> {
-                    JwtDecoder requestDecoder = decoder;
-                    if (resolver != null) {
-                        URI zone = resolveZone(resolver, request);
-                        if (zone == null) {
-                            throw new OAuth2AuthenticationException(
-                                    BearerTokenErrors.invalidToken("the request's zone is not configured"));
-                        }
-                        requestDecoder = ((KeycardJwtDecoder) decoder).forZone(zone);
+                    URI zone = resolveZone(resolver, request);
+                    if (zone == null) {
+                        throw new OAuth2AuthenticationException(
+                                BearerTokenErrors.invalidToken("the request's zone is not configured"));
                     }
-                    JwtDecoder selected = requestDecoder;
+                    JwtDecoder selected = ((KeycardJwtDecoder) decoder).forZone(zone);
                     JwtAuthenticationProvider provider = new JwtAuthenticationProvider(
-                            introspection == null
+                            check == null
                                     ? selected
                                     : token -> {
                                         Jwt jwt = selected.decode(token);
@@ -226,7 +233,6 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             }
         });
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
-        BearerTokenIntrospection check = introspection;
         if (check != null) {
             http.addFilterAfter(
                     new OncePerRequestFilter() {
@@ -234,10 +240,16 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                         protected void doFilterInternal(
                                 HttpServletRequest request, HttpServletResponse response, FilterChain chain)
                                 throws ServletException, IOException {
-                            Object verified = request.getAttribute(VERIFIED_BEARER_ATTRIBUTE);
-                            if (verified instanceof Jwt jwt) {
+                            if (request.getAttribute(PRESENT_BEARER_ATTRIBUTE) instanceof String token) {
+                                Jwt jwt = verifiedJwt(request, token);
+                                if (jwt == null) {
+                                    getSecurityContextHolderStrategy().clearContext();
+                                    BearerTokenIntrospection.unavailable(response);
+                                    return;
+                                }
                                 switch (check.check(jwt.getClaimAsString("iss"), jwt.getTokenValue())) {
                                     case INACTIVE -> {
+                                        getSecurityContextHolderStrategy().clearContext();
                                         challenge.commence(
                                                 request,
                                                 response,
@@ -246,6 +258,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                                         return;
                                     }
                                     case UNAVAILABLE -> {
+                                        getSecurityContextHolderStrategy().clearContext();
                                         BearerTokenIntrospection.unavailable(response);
                                         return;
                                     }
@@ -283,6 +296,22 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                     },
                     X509AuthenticationFilter.class);
         }
+    }
+
+    private @Nullable Jwt verifiedJwt(HttpServletRequest request, String bearer) {
+        Object verified = request.getAttribute(VERIFIED_BEARER_ATTRIBUTE);
+        if (zoneResolver == null) {
+            Authentication authentication =
+                    getSecurityContextHolderStrategy().getContext().getAuthentication();
+            if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
+                verified = jwtAuthentication.getToken();
+            } else if (authentication != null) {
+                verified = authentication.getCredentials() instanceof Jwt
+                        ? authentication.getCredentials()
+                        : authentication.getPrincipal();
+            }
+        }
+        return verified instanceof Jwt jwt && bearer.equals(jwt.getTokenValue()) ? jwt : null;
     }
 
     static AuthenticationEntryPoint challenge(@Nullable ResourceBinding binding, @Nullable ZoneResolver zoneResolver) {
