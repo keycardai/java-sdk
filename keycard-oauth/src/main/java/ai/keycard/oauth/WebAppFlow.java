@@ -39,6 +39,6 @@ public record WebAppFlow(URI url, String state, String codeVerifier, List<URI> r
      */
     @Override
     public String toString() {
-        return "WebAppFlow[url=" + url + ", resources=" + resources + "]";
+        return "WebAppFlow[url=" + url + ", state=" + state + ", resources=" + resources + "]";
     }
 }

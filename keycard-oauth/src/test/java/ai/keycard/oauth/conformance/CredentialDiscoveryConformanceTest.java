@@ -8,6 +8,7 @@ import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.CredentialDiscovery;
 import ai.keycard.oauth.CredentialDiscoveryException;
 import ai.keycard.oauth.CredentialDiscoveryException.Reason;
+import ai.keycard.oauth.FileKeyStorage;
 import ai.keycard.oauth.FileTokenSource;
 import ai.keycard.oauth.WebIdentity;
 import ai.keycard.oauth.WorkloadIdentity;
@@ -156,11 +157,19 @@ class CredentialDiscoveryConformanceTest {
     void row13() throws Exception {
         Path keycard = tokenFile("keycard");
         Path aws = tokenFile("aws");
+        Files.writeString(keycard, "keycard.payload.signature");
         Credential credential = discover(env(
                 "KEYCARD_APPLICATION_CREDENTIAL_TYPE", "eks_workload_identity",
                 "AWS_WEB_IDENTITY_TOKEN_FILE", aws.toString(),
                 "KEYCARD_EKS_WORKLOAD_IDENTITY_TOKEN_FILE", keycard.toString()));
-        assertThat(credential.toString()).contains(keycard.toString()).doesNotContain(aws.toString());
+        URI issuer = URI.create("https://z");
+        assertThat(credential)
+                .isInstanceOfSatisfying(
+                        WorkloadIdentity.class,
+                        workload -> assertThat(workload.authenticate(issuer, issuer.resolve("/token"))
+                                        .formFields())
+                                .containsEntry("client_assertion", "keycard.payload.signature"));
+        assertThat(credential.toString()).doesNotContain(keycard.toString(), aws.toString());
     }
 
     @Test
@@ -229,15 +238,28 @@ class CredentialDiscoveryConformanceTest {
     @DisplayName("row 20: selecting web_identity without a directory uses the default storage")
     void row20() {
         Credential credential = discover(env("KEYCARD_APPLICATION_CREDENTIAL_TYPE", "web_identity"));
-        assertThat(credential).isInstanceOf(WebIdentity.class);
-        assertThat(credential.toString()).contains("server_keys");
+        assertThat(credential)
+                .isInstanceOfSatisfying(
+                        WebIdentity.class,
+                        identity -> assertThat(identity.toString())
+                                .contains(FileKeyStorage.class.getName())
+                                .doesNotContain("server_keys"));
+        assertThat(credential)
+                .extracting("storage")
+                .isInstanceOfSatisfying(
+                        FileKeyStorage.class,
+                        storage -> assertThat(storage.dir()).isEqualTo(FileKeyStorage.DEFAULT_DIR));
     }
 
     @Test
     @DisplayName("row 21: a mapping holding only the storage directory builds a WebIdentity over it")
     void row21() {
         Credential credential = discover(env("KEYCARD_WEB_IDENTITY_KEY_STORAGE_DIR", dir.toString()));
-        assertThat(credential.toString()).contains(dir.toString());
+        assertThat(credential).isInstanceOfSatisfying(WebIdentity.class, identity -> {
+            identity.publicJwks();
+            assertThat(dir.resolve(identity.keyId() + ".pem")).isRegularFile();
+            assertThat(identity.toString()).doesNotContain(dir.toString());
+        });
     }
 
     @Test

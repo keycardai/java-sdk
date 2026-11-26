@@ -65,8 +65,8 @@ public record RegisteredClient(
      */
     @Override
     public String toString() {
-        return "RegisteredClient[clientId=" + clientId + ", clientSecret="
-                + (clientSecret == null ? "absent" : "present") + ", clientSecretExpiresAt=" + clientSecretExpiresAt
+        return "RegisteredClient[clientId=" + clientId + ", clientIdIssuedAt=" + clientIdIssuedAt
+                + ", clientSecretExpiresAt=" + clientSecretExpiresAt
                 + ", registrationClientUri=" + registrationClientUri + "]";
     }
 }

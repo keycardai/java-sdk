@@ -30,6 +30,7 @@ import ai.keycard.oauth.testing.TestClock;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -452,6 +453,30 @@ class DeviceAuthorizationConformanceTest {
                     .containsExactly("persisted-code");
             assertThat(persisted.toString()).doesNotContain("persisted-code");
         }
+    }
+
+    @Test
+    @DisplayName("row 38: device code is absent from display and kept on the record for persistence")
+    void row38() throws Exception {
+        DeviceAuthorization authorization = new DeviceAuthorization(
+                "secret-device-code",
+                "public-user-code",
+                URI.create("https://zone.example/device"),
+                URI.create("https://zone.example/device?user_code=public-user-code"),
+                seconds(600),
+                seconds(5),
+                Instant.EPOCH.plusSeconds(600));
+
+        assertThat(authorization.toString())
+                .contains(
+                        "userCode=public-user-code",
+                        "verificationUri=https://zone.example/device",
+                        "verificationUriComplete=https://zone.example/device?user_code=public-user-code",
+                        "expiresIn=PT10M",
+                        "interval=PT5S",
+                        "expiresAt=1970-01-01T00:10:00Z")
+                .doesNotContain("secret-device-code");
+        assertThat(authorization.deviceCode()).isEqualTo("secret-device-code");
     }
 
     @Test

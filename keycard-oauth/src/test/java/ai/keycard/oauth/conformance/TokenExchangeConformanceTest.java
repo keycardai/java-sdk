@@ -9,6 +9,7 @@ import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.HttpStatusException;
+import ai.keycard.oauth.IdentityTokenSource;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.KeycardHttpTransport;
 import ai.keycard.oauth.NetworkException;
@@ -25,6 +26,7 @@ import ai.keycard.oauth.WorkloadIdentity;
 import ai.keycard.oauth.WorkloadIdentityRuntimeException;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.TestClock;
+import com.nimbusds.jose.util.JSONObjectUtils;
 import java.net.ConnectException;
 import java.net.URI;
 import java.time.Duration;
@@ -54,6 +56,75 @@ class TokenExchangeConformanceTest {
             "{\"issuer\":\"https://acme.keycard.cloud\",\"token_endpoint\":\"https://acme.keycard.cloud/token\"}";
 
     private final TestClock clock = TestClock.start();
+
+    @Test
+    @DisplayName("a credential and client print an identity source's type without calling its toString")
+    void identitySourcesPrintTheirTypeWithoutInvokingToString() {
+        var source = new IdentityTokenSource() {
+            @Override
+            public String identityToken() {
+                return "secret-source-token";
+            }
+
+            @Override
+            public String toString() {
+                return identityToken();
+            }
+        };
+        WorkloadIdentity credential =
+                WorkloadIdentity.builder(source).clientId("public-client").build();
+        TokenExchangeClient client = TokenExchangeClient.builder(URI.create("https://acme.keycard.cloud"))
+                .credential(credential)
+                .actor(source)
+                .build();
+
+        assertThat(credential.toString())
+                .contains(source.getClass().getName(), "public-client")
+                .doesNotContain("secret-source-token");
+        assertThat(client.toString())
+                .contains(
+                        "https://acme.keycard.cloud",
+                        WorkloadIdentity.class.getName(),
+                        source.getClass().getName())
+                .doesNotContain("secret-source-token", "public-client");
+    }
+
+    @Test
+    @DisplayName("row 27: requests and responses omit tokens from display and response JSON retains them")
+    void row27() throws Exception {
+        TokenExchangeRequest request = TokenExchangeRequest.builder("secret-subject")
+                .actorToken("secret-actor", TokenTypes.JWT)
+                .clientAssertion("secret-assertion", TokenTypes.JWT_BEARER_ASSERTION)
+                .scope("read")
+                .build();
+        assertThat(request.toString())
+                .contains(
+                        "grantType=" + TokenTypes.TOKEN_EXCHANGE_GRANT,
+                        "scope=read",
+                        "actorTokenType=" + TokenTypes.JWT)
+                .doesNotContain("secret-subject", "secret-actor", "secret-assertion");
+
+        Map<String, Object> tokens =
+                Map.of("access_token", "secret-access", "refresh_token", "secret-refresh", "id_token", "secret-id");
+        TokenResponse response = new TokenResponse(
+                "secret-access",
+                "Bearer",
+                Duration.ofSeconds(300),
+                List.of("read"),
+                TokenTypes.ACCESS_TOKEN,
+                "secret-refresh",
+                "secret-id",
+                tokens);
+        assertThat(response.toString())
+                .contains(
+                        "tokenType=Bearer",
+                        "expiresIn=PT5M",
+                        "scope=[read]",
+                        "issuedTokenType=" + TokenTypes.ACCESS_TOKEN)
+                .doesNotContain("secret-access", "secret-refresh", "secret-id");
+        assertThat(JSONObjectUtils.parse(JSONObjectUtils.toJSONString(response.raw())))
+                .containsAllEntriesOf(tokens);
+    }
 
     @Test
     @DisplayName("row 1: a request with only subject_token defaults grant_type and subject_token_type")

@@ -143,6 +143,15 @@ class ClientSecretConformanceTest {
                 BETA, ClientSecret.of("beta-client", "beta-secret")));
     }
 
+    @Test
+    @DisplayName("row 9: client authentication prints header and form names without values")
+    void row9() {
+        ClientAuthentication auth = ClientSecret.of("my-client", "s3cret").authenticate(ACME, TOKEN);
+        assertThat(auth.toString()).contains("Authorization").doesNotContain("s3cret", basic("my-client", "s3cret"));
+        ClientAuthentication assertion = new ClientAuthentication(Map.of(), Map.of("client_assertion", "secret-jwt"));
+        assertThat(assertion.toString()).contains("client_assertion").doesNotContain("secret-jwt");
+    }
+
     /** The expected header value for ids and secrets made only of unreserved characters. */
     static String basic(String id, String secret) {
         return Base64.getEncoder().encodeToString((id + ":" + secret).getBytes(StandardCharsets.UTF_8));
