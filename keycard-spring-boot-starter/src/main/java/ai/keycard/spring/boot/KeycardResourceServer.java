@@ -234,6 +234,27 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         });
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
         if (check != null) {
+            if (zoneResolver == null && decoder instanceof KeycardJwtDecoder keycardDecoder) {
+                http.addFilterBefore(
+                        new OncePerRequestFilter() {
+                            @Override
+                            protected void doFilterInternal(
+                                    HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+                                    throws ServletException, IOException {
+                                var previous = keycardDecoder.swapVerifiedJwtCapture(jwt -> {
+                                    if (jwt.getTokenValue().equals(request.getAttribute(PRESENT_BEARER_ATTRIBUTE))) {
+                                        request.setAttribute(VERIFIED_BEARER_ATTRIBUTE, jwt);
+                                    }
+                                });
+                                try {
+                                    chain.doFilter(request, response);
+                                } finally {
+                                    keycardDecoder.swapVerifiedJwtCapture(previous);
+                                }
+                            }
+                        },
+                        BearerTokenAuthenticationFilter.class);
+            }
             http.addFilterAfter(
                     new OncePerRequestFilter() {
                         @Override
@@ -300,7 +321,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
 
     private @Nullable Jwt verifiedJwt(HttpServletRequest request, String bearer) {
         Object verified = request.getAttribute(VERIFIED_BEARER_ATTRIBUTE);
-        if (zoneResolver == null) {
+        if (verified == null && zoneResolver == null) {
             Authentication authentication =
                     getSecurityContextHolderStrategy().getContext().getAuthentication();
             if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {

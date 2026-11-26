@@ -139,6 +139,23 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("introspection accepts a JWT converter that retains only an application principal")
+    void introspectionWithCustomPrincipal() {
+        withIntrospectionApp(CustomPrincipalChain.class, "true", (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            var active = perform(mvc, "/me", jwt);
+            assertThat(active.getResponse().getStatus()).isEqualTo(200);
+            assertThat(body(active)).isEqualTo("user-1");
+            zone.respond("POST", PATH, 200, "{\"active\":false}");
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(401);
+            assertThat(zone.requests(PATH))
+                    .hasSize(2)
+                    .allSatisfy(
+                            call -> assertThat(call.formParams().get("token")).containsExactly(jwt));
+        });
+    }
+
+    @Test
     @DisplayName("row 21 (Spring): invalid local tokens and default or disabled introspection make no call")
     void introspectionSkipped() {
         withIntrospectionApp(DefaultChain.class, "true", (zone, mvc) -> {
@@ -646,6 +663,36 @@ class KeycardStarterConformanceTest {
                                     decoded, null, List.of(new SimpleGrantedAuthority("custom"))))))
                     .with(keycard, Customizer.withDefaults())
                     .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class CustomPrincipalChain {
+
+        @Bean
+        SecurityFilterChain customPrincipal(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("custom"))
+                    .oauth2ResourceServer(server -> server.jwt(jwt ->
+                            jwt.jwtAuthenticationConverter(decoded -> UsernamePasswordAuthenticationToken.authenticated(
+                                    decoded.getSubject(), null, List.of(new SimpleGrantedAuthority("custom"))))))
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+
+        @Bean
+        PrincipalApi principalApi() {
+            return new PrincipalApi();
+        }
+    }
+
+    @RestController
+    static class PrincipalApi {
+
+        @GetMapping("/me")
+        String me(@AuthenticationPrincipal String principal) {
+            return principal;
         }
     }
 
