@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class CredentialDiscovery {
 
-    /** The registered client id. */
+    /** The registered client id, also attached to discovered workload and web identities when set. */
     public static final String CLIENT_ID = "KEYCARD_CLIENT_ID";
 
     /** The registered client secret. */
@@ -108,7 +108,7 @@ public final class CredentialDiscovery {
                         resolvable);
             }
             if (type.equals(WEB_IDENTITY_TYPE)) {
-                return webIdentity(storageDir, webIdentityServerName);
+                return webIdentity(storageDir, webIdentityServerName, clientId);
             }
             if (!resolvable.contains(type)) {
                 String needs = type.equals(CLIENT_SECRET_TYPE)
@@ -163,17 +163,21 @@ public final class CredentialDiscovery {
                 }
                 return workload.build();
             default:
-                return webIdentity(storageDir, serverName);
+                return webIdentity(storageDir, serverName, clientId);
         }
     }
 
-    private static WebIdentity webIdentity(@Nullable String storageDir, @Nullable String serverName) {
+    private static WebIdentity webIdentity(
+            @Nullable String storageDir, @Nullable String serverName, @Nullable String clientId) {
         WebIdentity.Builder builder = WebIdentity.builder();
         if (storageDir != null) {
             builder.storageDir(Path.of(storageDir));
         }
         if (serverName != null && !serverName.isEmpty()) {
             builder.serverName(serverName);
+        }
+        if (clientId != null) {
+            builder.clientId(clientId);
         }
         return builder.build();
     }

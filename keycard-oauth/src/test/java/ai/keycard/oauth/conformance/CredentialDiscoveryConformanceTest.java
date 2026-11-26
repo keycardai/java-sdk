@@ -17,12 +17,13 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** credential-discovery.md (spec-version 2), Unit Tests table, rows 1 to 22. */
+/** credential-discovery.md (spec-version 3), Unit Tests table, rows 1 to 24. */
 class CredentialDiscoveryConformanceTest {
 
     @TempDir
@@ -271,9 +272,39 @@ class CredentialDiscoveryConformanceTest {
     }
 
     @Test
+    @DisplayName("row 23: inferred and explicitly selected WebIdentity credentials carry the client id")
+    void row23() {
+        for (Map<String, String> environment : webIdentityEnvironments(env("KEYCARD_CLIENT_ID", "cid"))) {
+            assertThat(discover(environment))
+                    .isInstanceOfSatisfying(
+                            WebIdentity.class,
+                            identity -> assertThat(identity.clientId()).isEqualTo("cid"));
+        }
+    }
+
+    @Test
+    @DisplayName("row 24: inferred and explicitly selected WebIdentity credentials accept an unset or empty client id")
+    void row24() {
+        for (Map<String, String> clientEnv : List.of(env(), env("KEYCARD_CLIENT_ID", ""))) {
+            for (Map<String, String> environment : webIdentityEnvironments(clientEnv)) {
+                assertThat(discover(environment))
+                        .isInstanceOfSatisfying(
+                                WebIdentity.class,
+                                identity -> assertThat(identity.clientId()).isNull());
+            }
+        }
+    }
+
+    @Test
     @DisplayName("empty strings count as unset")
     void emptyIsUnset() {
         assertReason(env("KEYCARD_CLIENT_ID", "", "KEYCARD_CLIENT_SECRET", ""), Reason.ABSENT);
+    }
+
+    private List<Map<String, String>> webIdentityEnvironments(Map<String, String> base) {
+        Map<String, String> inferred = new HashMap<>(base);
+        inferred.put("KEYCARD_WEB_IDENTITY_KEY_STORAGE_DIR", dir.toString());
+        return List.of(inferred, with(base, "web_identity"));
     }
 
     private static Credential discover(Map<String, String> environment) {
