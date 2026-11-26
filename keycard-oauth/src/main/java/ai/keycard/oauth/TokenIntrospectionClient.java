@@ -273,9 +273,11 @@ public final class TokenIntrospectionClient {
          *
          * @param transport the transport
          * @return this builder
+         * @throws ConfigurationException if the transport follows redirects
          */
         public Builder transport(KeycardHttpTransport transport) {
-            this.transport = Objects.requireNonNull(transport, "transport");
+            Objects.requireNonNull(transport, "transport").requireRedirectsDisabled();
+            this.transport = transport;
             return this;
         }
 

@@ -517,6 +517,9 @@ class TokenIntrospectionConformanceTest {
         assertThatThrownBy(() -> TokenIntrospectionClient.builder(ISSUER).httpClient(http))
                 .isInstanceOf(ConfigurationException.class)
                 .hasMessageContaining("redirects to be disabled");
+        assertThatThrownBy(() -> TokenIntrospectionClient.builder(ISSUER).transport(KeycardHttpTransport.of(http)))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("redirects to be disabled");
     }
 
     @Test

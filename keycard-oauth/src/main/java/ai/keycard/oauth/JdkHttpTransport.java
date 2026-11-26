@@ -42,7 +42,7 @@ final class JdkHttpTransport implements KeycardHttpTransport {
     @Override
     public void requireRedirectsDisabled() {
         if (client.followRedirects() != HttpClient.Redirect.NEVER) {
-            throw new ConfigurationException("A2A delegation requires HTTP redirects to be disabled");
+            throw new ConfigurationException("this operation requires HTTP redirects to be disabled");
         }
     }
 
