@@ -6,8 +6,11 @@ import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -31,15 +34,18 @@ public final class TokenVerifier {
 
     private final List<URI> issuers;
     private final String[] audiences;
+    private final Map<URI, String> audiencesByIssuer;
     private final String[] algorithms;
     private final Duration clockSkew;
     private final Clock clock;
     private final JwksKeyring keyring;
-    private final JwtVerifier verifier;
+    private final @Nullable JwtVerifier verifier;
+    private final Map<URI, JwtVerifier> scopedVerifiers;
 
     private TokenVerifier(Builder builder) {
         this.issuers = List.copyOf(builder.issuers);
         this.audiences = builder.audiences;
+        this.audiencesByIssuer = builder.audiencesByIssuer;
         this.algorithms = builder.algorithms;
         this.clockSkew = builder.clockSkew;
         this.clock = builder.clock;
@@ -52,12 +58,18 @@ public final class TokenVerifier {
                         .discoveryTtl(builder.discoveryTtl)
                         .clock(builder.clock)
                         .build();
-        this.verifier = jwtVerifier(issuers);
-        if (audiences.length == 0) {
+        this.verifier = audiencesByIssuer.isEmpty() ? jwtVerifier(issuers, audiences) : null;
+        Map<URI, JwtVerifier> scoped = new HashMap<>();
+        for (URI issuer : issuers) {
+            String[] expected = audiencesByIssuer.isEmpty() ? audiences : new String[] {audiencesByIssuer.get(issuer)};
+            scoped.put(issuer, jwtVerifier(List.of(issuer), expected));
+        }
+        this.scopedVerifiers = Map.copyOf(scoped);
+        if (audiences.length == 0 && audiencesByIssuer.isEmpty() && !builder.allowAnyAudience) {
             LOG.log(
                     Level.WARNING,
                     "TokenVerifier has no audiences configured, so it accepts a token minted for any resource in the "
-                            + "zone; pass this server's registered resource identifier to audiences(...).");
+                            + "zone; configure resource_identifier on the resource server or audiences(...) on the verifier.");
         }
     }
 
@@ -81,6 +93,9 @@ public final class TokenVerifier {
      * @throws JwksException when the issuer's keys can't be fetched
      */
     public AccessToken verifyToken(String token) {
+        if (verifier == null) {
+            throw new InvalidTokenException("this verifier requires a request-selected zone");
+        }
         return new AccessToken(token, verifier.verify(token));
     }
 
@@ -95,10 +110,11 @@ public final class TokenVerifier {
      * @throws JwksException when the zone's keys can't be fetched
      */
     public AccessToken verifyTokenForZone(String token, URI issuer) {
-        if (!issuers.contains(issuer)) {
+        JwtVerifier scoped = scopedVerifiers.get(issuer);
+        if (scoped == null) {
             throw new InvalidTokenException("zone " + issuer + " is not configured on this verifier");
         }
-        return new AccessToken(token, jwtVerifier(List.of(issuer)).verify(token));
+        return new AccessToken(token, scoped.verify(token));
     }
 
     /** Drops every cached key and discovery result. */
@@ -115,14 +131,32 @@ public final class TokenVerifier {
         return issuers;
     }
 
-    private JwtVerifier jwtVerifier(List<URI> trusted) {
+    /**
+     * The global audience list, empty when unrestricted or configured per issuer.
+     *
+     * @return the global audiences
+     */
+    public List<String> audiences() {
+        return List.of(audiences);
+    }
+
+    /**
+     * The exact audience required for each issuer when the request selects the zone.
+     *
+     * @return the per-issuer audience configuration
+     */
+    public Map<URI, String> audiencesByIssuer() {
+        return audiencesByIssuer;
+    }
+
+    private JwtVerifier jwtVerifier(List<URI> trusted, String[] expectedAudiences) {
         JwtVerifier.Builder builder = JwtVerifier.builder(trusted.toArray(URI[]::new))
                 .algorithms(algorithms)
                 .clockSkew(clockSkew)
                 .keyring(keyring)
                 .clock(clock);
-        if (audiences.length > 0) {
-            builder.audiences(audiences);
+        if (expectedAudiences.length > 0) {
+            builder.audiences(expectedAudiences);
         }
         return builder.build();
     }
@@ -132,6 +166,8 @@ public final class TokenVerifier {
 
         private final List<URI> issuers;
         private String[] audiences = new String[0];
+        private Map<URI, String> audiencesByIssuer = Map.of();
+        private boolean allowAnyAudience;
         private String[] algorithms = {"RS256"};
         private Duration clockSkew = Duration.ZERO;
         private KeycardHttpTransport transport;
@@ -165,6 +201,31 @@ public final class TokenVerifier {
                 throw new ConfigurationException("audiences must not be empty");
             }
             this.audiences = audiences.clone();
+            return this;
+        }
+
+        /**
+         * Requires one exact audience for each request-selected issuer.
+         *
+         * @param audiences the mapping, covering all trusted issuers
+         * @return this builder
+         */
+        public Builder audiencesByIssuer(Map<URI, String> audiences) {
+            if (!audiences.keySet().equals(Set.copyOf(issuers))
+                    || audiences.values().stream().anyMatch(String::isBlank)) {
+                throw new ConfigurationException("per-issuer audiences must cover exactly the trusted issuers");
+            }
+            this.audiencesByIssuer = Map.copyOf(audiences);
+            return this;
+        }
+
+        /**
+         * Explicitly skips audience validation while retaining all other verification.
+         *
+         * @return this builder
+         */
+        public Builder allowAnyAudience() {
+            this.allowAnyAudience = true;
             return this;
         }
 
@@ -273,6 +334,10 @@ public final class TokenVerifier {
          * @throws ConfigurationException for an unsupported algorithm or out-of-range setting
          */
         public TokenVerifier build() {
+            if ((allowAnyAudience && (audiences.length > 0 || !audiencesByIssuer.isEmpty()))
+                    || (audiences.length > 0 && !audiencesByIssuer.isEmpty())) {
+                throw new ConfigurationException("conflicting audience policies");
+            }
             return new TokenVerifier(this);
         }
     }
