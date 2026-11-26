@@ -81,11 +81,11 @@ public final class FileTokenSource implements IdentityTokenSource {
             token = Files.readString(path, StandardCharsets.UTF_8).strip();
         } catch (IOException e) {
             throw new WorkloadIdentityRuntimeException(
-                    "reading token file " + path + " failed", WorkloadIdentityRuntimeException.SOURCE_FILE, e);
+                    "reading token file " + path + " failed", WorkloadIdentityRuntimeException.SOURCE_FILE, e, true);
         }
         if (token.isEmpty()) {
             throw new WorkloadIdentityRuntimeException(
-                    "token file is empty: " + path, WorkloadIdentityRuntimeException.SOURCE_FILE, null);
+                    "token file is empty: " + path, WorkloadIdentityRuntimeException.SOURCE_FILE, null, true);
         }
         return token;
     }

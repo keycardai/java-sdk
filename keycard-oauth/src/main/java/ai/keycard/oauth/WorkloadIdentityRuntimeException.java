@@ -26,15 +26,14 @@ public class WorkloadIdentityRuntimeException extends KeycardException {
     private final String source;
 
     /**
-     * Creates the exception.
+     * Creates a non-retryable exception.
      *
      * @param message what failed
      * @param source the source identifier, such as {@link #SOURCE_FILE}
      * @param cause the underlying failure, or {@code null}
      */
     public WorkloadIdentityRuntimeException(String message, String source, @Nullable Throwable cause) {
-        super(message, cause, cause instanceof KeycardException keycard && keycard.retryable());
-        this.source = source;
+        this(message, source, cause, false);
     }
 
     /**
