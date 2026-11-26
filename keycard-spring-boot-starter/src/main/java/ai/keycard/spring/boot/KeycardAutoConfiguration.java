@@ -65,7 +65,7 @@ public class KeycardAutoConfiguration {
     @ConditionalOnMissingBean
     public AuthProvider keycardAuthProvider(KeycardProperties properties, ObjectProvider<Credential> credential) {
         AuthProvider.Builder builder = AuthProvider.builder(Objects.requireNonNull(properties.zoneUrl()));
-        if (properties.audiences() != null) {
+        if (properties.audiences() != null && !properties.audiences().isEmpty()) {
             builder.audiences(properties.audiences().toArray(String[]::new));
         }
         if (properties.resourceIdentifier() != null) {

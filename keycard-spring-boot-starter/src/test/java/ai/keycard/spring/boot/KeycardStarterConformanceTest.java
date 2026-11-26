@@ -193,6 +193,36 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("bearer row 7: an empty legacy audience property behaves like omission")
+    void emptyLegacyAudience() {
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    assertThat(perform(mvc, "/me", token(zone, "read", "urn:example:other"))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    assertThat(perform(mvc, "/me", null).getResponse().getHeader("WWW-Authenticate"))
+                            .contains("resource_metadata=");
+                },
+                "keycard.audiences=");
+    }
+
+    @Test
+    @DisplayName("bearer row 8e: an empty audience property cannot enable multi-resource mode")
+    void emptyMultiResourceAudience() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.audiences=", "keycard.multi-resource=true")
+                    .withUserConfiguration(DefaultChain.class)
+                    .run(context -> assertThat(context)
+                            .hasFailed()
+                            .getFailure()
+                            .hasRootCauseMessage("multiResource requires a nonempty audience list"));
+        }
+    }
+
+    @Test
     @DisplayName("bearer rows 1, 8, 12 and metadata row 7: configured resource binds Spring end to end")
     void explicitResource() {
         String identifier = AUDIENCE + "/me";
