@@ -37,7 +37,7 @@ rows, such as construction errors and Java-specific edges, named without a row n
 | `application-credentials/client-secret` | `ClientSecretConformanceTest` | 9 |
 | `application-credentials/workload-identity` | `WorkloadIdentityConformanceTest` | 13 |
 | `application-credentials/web-identity` | `WebIdentityConformanceTest` | 13 |
-| `application-credentials/credential-discovery` | `CredentialDiscoveryConformanceTest` | 23 |
+| `application-credentials/credential-discovery` | `CredentialDiscoveryConformanceTest` | 25 |
 | `jwt-jwks/jwt-signing-and-verification` | `JwtSigningAndVerificationConformanceTest` | 16 |
 | `jwt-jwks/jwks-caching` | `JwksCachingConformanceTest` | 17 |
 | `delegated-access/access-context` | `AccessContextConformanceTest` | 9 |
