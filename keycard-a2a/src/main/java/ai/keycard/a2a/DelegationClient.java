@@ -48,14 +48,15 @@ public final class DelegationClient {
 
     private final TokenExchangeClient exchange;
     private final ServiceDiscovery discovery;
-    private final KeycardHttpTransport transport;
+    private final KeycardHttpTransport invocationTransport;
     private final int maxPeerResponseBytes;
     private final Duration invokeTimeout;
     private final Wire wire;
     private final Set<String> trustedOrigins;
 
     private DelegationClient(Builder builder) {
-        this.transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
+        KeycardHttpTransport transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
+        this.invocationTransport = builder.invocationTransport == null ? transport : builder.invocationTransport;
         this.maxPeerResponseBytes = builder.maxPeerResponseBytes;
         this.wire = Wire.of(builder.protocolVersion);
         this.exchange = TokenExchangeClient.builder(builder.issuer)
@@ -92,7 +93,8 @@ public final class DelegationClient {
      * @param params the {@code message/send} params in the 1.0 shape, such as {@link
      *     A2aProtocol#textMessage(String)}
      * @return the JSON-RPC result (a {@code message} or a {@code task}) and the card
-     * @throws A2aDiscoveryException when the card can't be fetched or is invalid
+     * @throws A2aDiscoveryException when the card can't be fetched or is invalid, or when an
+     *     invocation endpoint or redirect has an untrusted origin
      * @throws ai.keycard.oauth.OAuthErrorException when the zone refuses the exchange; the target
      *     isn't called
      * @throws A2aInvocationException when the call fails or the target answers with a JSON-RPC
@@ -109,7 +111,7 @@ public final class DelegationClient {
         // Resolve and vet the endpoint before exchanging, so a bad card never costs a token.
         URI url = endpoint(target, card, base);
         String token = exchange.exchangeToken(subjectToken, URI.create(base)).accessToken();
-        return new DelegationResult(wire.decodeResult(call(url, token, params)), card);
+        return new DelegationResult(wire.decodeResult(call(url, target, token, params)), card);
     }
 
     /**
@@ -160,7 +162,30 @@ public final class DelegationClient {
         return scheme + "://" + host + ":" + port;
     }
 
-    private Map<String, Object> call(URI url, String token, Map<String, Object> params) {
+    private void checkRedirect(TransportResponse response, URI url, URI target) {
+        switch (response.status()) {
+            case 301, 302, 303, 307, 308 -> {
+                String location = response.header("Location");
+                if (location == null || location.isEmpty()) {
+                    return;
+                }
+                URI redirect;
+                try {
+                    redirect = url.resolve(location);
+                } catch (IllegalArgumentException e) {
+                    return;
+                }
+                String redirectOrigin = origin(redirect);
+                if (!redirectOrigin.equals(origin(target)) && !trustedOrigins.contains(redirectOrigin)) {
+                    throw new A2aDiscoveryException(
+                            "redirect origin " + redirectOrigin + " is not trusted for target " + target, null, false);
+                }
+            }
+            default -> {}
+        }
+    }
+
+    private Map<String, Object> call(URI url, URI target, String token, Map<String, Object> params) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("jsonrpc", "2.0");
         payload.put("id", UUID.randomUUID().toString());
@@ -173,13 +198,14 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = transport.sendWithLimit(request, maxPeerResponseBytes);
+            response = invocationTransport.sendWithLimit(request, maxPeerResponseBytes);
         } catch (ResponseBodyTooLargeException e) {
             throw e.status() >= 200 && e.status() < 300 ? e.nonRetryable() : e;
         } catch (KeycardException e) {
             throw new A2aInvocationException(
                     "invocation of " + url + " failed: " + e.getMessage(), e, e.retryable(), 0, null);
         }
+        checkRedirect(response, url, target);
         Map<String, Object> document = parse(response.body());
         Map<String, Object> rpcError =
                 document != null && document.get("error") instanceof Map<?, ?> error ? stringKeys(error) : null;
@@ -237,6 +263,7 @@ public final class DelegationClient {
         private final URI issuer;
         private @Nullable Credential credential;
         private @Nullable KeycardHttpTransport transport;
+        private @Nullable KeycardHttpTransport invocationTransport;
         private int maxPeerResponseBytes = ServiceDiscovery.DEFAULT_MAX_PEER_RESPONSE_BYTES;
         private Duration fetchTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private Duration invokeTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
@@ -268,17 +295,33 @@ public final class DelegationClient {
          */
         public Builder transport(KeycardHttpTransport transport) {
             this.transport = Objects.requireNonNull(transport, "transport");
+            this.invocationTransport = null;
             return this;
         }
 
         /**
-         * Sends requests through this JDK client.
+         * Sends requests through this JDK client. If it follows redirects, invocation uses a
+         * separate JDK client with the same configuration and redirects disabled.
          *
          * @param client the client
          * @return this builder
          */
         public Builder httpClient(HttpClient client) {
-            return transport(KeycardHttpTransport.of(client));
+            transport(KeycardHttpTransport.of(client));
+            if (client.followRedirects() != HttpClient.Redirect.NEVER) {
+                HttpClient.Builder invocationClient = HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.NEVER)
+                        .sslContext(client.sslContext())
+                        .sslParameters(client.sslParameters())
+                        .version(client.version());
+                client.authenticator().ifPresent(invocationClient::authenticator);
+                client.connectTimeout().ifPresent(invocationClient::connectTimeout);
+                client.cookieHandler().ifPresent(invocationClient::cookieHandler);
+                client.executor().ifPresent(invocationClient::executor);
+                client.proxy().ifPresent(invocationClient::proxy);
+                this.invocationTransport = KeycardHttpTransport.of(invocationClient.build());
+            }
+            return this;
         }
 
         /**

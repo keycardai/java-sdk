@@ -9,8 +9,10 @@ import ai.keycard.oauth.KeycardHttpTransport;
 import ai.keycard.oauth.OAuthErrorException;
 import ai.keycard.oauth.ResponseBodyTooLargeException;
 import ai.keycard.oauth.TokenTypes;
+import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.RecordedRequest;
+import ai.keycard.oauth.testing.StubZone.StubResponse;
 import ai.keycard.oauth.testing.TestClock;
 import com.nimbusds.jose.util.JSONObjectUtils;
 import com.sun.net.httpserver.HttpServer;
@@ -21,6 +23,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.GZIPOutputStream;
@@ -450,6 +453,105 @@ class A2aDelegationConformanceTest {
             }
         }
         return bytes.toByteArray();
+    }
+
+    @Test
+    @DisplayName("row 16: 307 and 302 redirects to untrusted origins receive no request")
+    void row16() {
+        for (int status : List.of(307, 302)) {
+            try (StubZone zone = zone();
+                    StubZone agent = agent(CARD);
+                    StubZone other = StubZone.start()) {
+                redirect(agent, status, other.url("/next").toString());
+                DelegationClient delegation = status == 307
+                        ? client(zone)
+                        : clientBuilder(zone)
+                                .httpClient(HttpClient.newBuilder()
+                                        .followRedirects(HttpClient.Redirect.ALWAYS)
+                                        .build())
+                                .build();
+                assertRedirectRefused(() -> invoke(delegation, agent.issuer()), other.issuer(), agent.issuer());
+                assertThat(other.requests()).isEmpty();
+                assertInitialInvocation(zone, agent);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("row 17: a relative same-origin redirect returns an invocation error")
+    void row17() {
+        try (StubZone zone = zone();
+                StubZone agent = agent(CARD)) {
+            redirect(agent, 307, "/next");
+            assertThatThrownBy(() -> invoke(client(zone), agent.issuer())).isInstanceOf(A2aInvocationException.class);
+            assertThat(agent.requests("/next")).isEmpty();
+            assertInitialInvocation(zone, agent);
+        }
+    }
+
+    @Test
+    @DisplayName("row 18: an allowlisted cross-origin redirect returns an invocation error")
+    void row18() {
+        try (StubZone zone = zone();
+                StubZone agent = agent(CARD);
+                StubZone other = StubZone.start()) {
+            redirect(agent, 307, other.url("/next").toString());
+            DelegationClient delegation =
+                    clientBuilder(zone).trustedEndpointOrigins(other.issuer()).build();
+            assertThatThrownBy(() -> invoke(delegation, agent.issuer())).isInstanceOf(A2aInvocationException.class);
+            assertThat(other.requests()).isEmpty();
+            assertInitialInvocation(zone, agent);
+        }
+    }
+
+    @Test
+    @DisplayName("row 19: an HTTPS to HTTP redirect is a disallowed origin change")
+    void row19() {
+        try (StubZone zone = zone()) {
+            URI target = URI.create("https://agent.example");
+            URI redirect = URI.create("http://agent.example/a2a/jsonrpc");
+            List<URI> peerRequests = new ArrayList<>();
+            KeycardHttpTransport network = KeycardHttpTransport.create();
+            DelegationClient delegation = clientBuilder(zone)
+                    .transport(request -> {
+                        URI uri = request.uri();
+                        if (uri.getHost().equals(zone.issuer().getHost())) {
+                            return network.send(request);
+                        }
+                        peerRequests.add(uri);
+                        if (uri.getPath().equals(A2aProtocol.AGENT_CARD_PATH)) {
+                            return new TransportResponse(200, Map.of(), CARD);
+                        }
+                        return new TransportResponse(307, Map.of("Location", List.of(redirect.toString())), "");
+                    })
+                    .build();
+            assertRedirectRefused(() -> invoke(delegation, target), redirect, target);
+            assertThat(peerRequests)
+                    .containsExactly(
+                            target.resolve(A2aProtocol.AGENT_CARD_PATH), target.resolve(A2aProtocol.JSONRPC_PATH));
+            assertThat(zone.requests(StubZone.TOKEN_PATH)).hasSize(1);
+        }
+    }
+
+    private static void redirect(StubZone agent, int status, String location) {
+        agent.respond("POST", A2aProtocol.JSONRPC_PATH, new StubResponse(status, Map.of("Location", location), ""));
+    }
+
+    private static void assertRedirectRefused(ThrowingCallable invocation, URI redirect, URI target) {
+        assertThatThrownBy(invocation).isInstanceOfSatisfying(A2aDiscoveryException.class, error -> {
+            assertThat(error.retryable()).isFalse();
+            assertThat(error)
+                    .hasMessageContaining("redirect origin " + DelegationClient.origin(redirect))
+                    .hasMessageContaining(target.toString());
+        });
+    }
+
+    private static void assertInitialInvocation(StubZone zone, StubZone agent) {
+        assertThat(zone.requests(StubZone.TOKEN_PATH)).hasSize(1);
+        assertThat(agent.requests(A2aProtocol.JSONRPC_PATH))
+                .singleElement()
+                .satisfies(
+                        request -> assertThat(request.header("Authorization")).isEqualTo("Bearer token-for-b"));
     }
 
     private static DelegationResult invoke(DelegationClient client, URI target) {
