@@ -1,3 +1,35 @@
+## v0.7.0 (2026-11-26)
+
+
+- feat(oauth,mcp,spring): bind resource discovery and audience (SDK-14) (#34)
+- * feat(oauth): support request-selected issuer audiences (SDK-14)
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * feat(mcp): bind resource discovery and audience (SDK-14)
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * feat(spring): use configured resource bindings (SDK-14)
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(mcp): preserve serialization of resource bindings
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(examples): exchange Spring AI caller tokens at their issuer
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(spring): preserve empty legacy audience configuration
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(mcp): reject unbound per issuer audiences
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(mcp): prevent provider verifiers from losing explicit binding
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(spring): apply custom JWT converters in per zone chains
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(spring): validate inspectable decoders against explicit binding
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(spring): validate binding only for chains that use it
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * test(mcp,spring): lead row display names with the row ids
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+Co-authored-by: Larry-Osakwe <Larry-Osakwe@users.noreply.github.com>
+
 ## v0.6.0 (2026-11-26)
 
 
