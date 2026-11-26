@@ -48,15 +48,14 @@ public final class DelegationClient {
 
     private final TokenExchangeClient exchange;
     private final ServiceDiscovery discovery;
-    private final KeycardHttpTransport invocationTransport;
+    private final KeycardHttpTransport transport;
     private final int maxPeerResponseBytes;
     private final Duration invokeTimeout;
     private final Wire wire;
     private final Set<String> trustedOrigins;
 
     private DelegationClient(Builder builder) {
-        KeycardHttpTransport transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
-        this.invocationTransport = transport.withoutRedirects();
+        this.transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
         this.maxPeerResponseBytes = builder.maxPeerResponseBytes;
         this.wire = Wire.of(builder.protocolVersion);
         this.exchange = TokenExchangeClient.builder(builder.issuer)
@@ -198,14 +197,15 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = invocationTransport.sendWithLimit(request, maxPeerResponseBytes);
+            response = transport.sendWithLimit(request, maxPeerResponseBytes, head -> checkRedirect(head, url, target));
+        } catch (A2aDiscoveryException e) {
+            throw e;
         } catch (ResponseBodyTooLargeException e) {
             throw e.status() >= 200 && e.status() < 300 ? e.nonRetryable() : e;
         } catch (KeycardException e) {
             throw new A2aInvocationException(
                     "invocation of " + url + " failed: " + e.getMessage(), e, e.retryable(), 0, null);
         }
-        checkRedirect(response, url, target);
         Map<String, Object> document = parse(response.body());
         Map<String, Object> rpcError =
                 document != null && document.get("error") instanceof Map<?, ?> error ? stringKeys(error) : null;
@@ -287,23 +287,25 @@ public final class DelegationClient {
         }
 
         /**
-         * The transport for discovery, the exchange and the call. Redirects are disabled for
-         * invocation when the transport exposes a configurable redirect policy.
+         * The transport for discovery, the exchange and the call. A custom transport must not
+         * follow redirects.
          *
          * @param transport the transport
          * @return this builder
+         * @throws ai.keycard.oauth.ConfigurationException if a visible client policy follows redirects
          */
         public Builder transport(KeycardHttpTransport transport) {
-            this.transport = Objects.requireNonNull(transport, "transport");
+            Objects.requireNonNull(transport, "transport").requireRedirectsDisabled();
+            this.transport = transport;
             return this;
         }
 
         /**
-         * Sends requests through this JDK client. If it follows redirects, invocation uses a
-         * separate JDK client with the same configuration and redirects disabled.
+         * Sends requests through this JDK client with redirects disabled.
          *
          * @param client the client
          * @return this builder
+         * @throws ai.keycard.oauth.ConfigurationException if the client follows redirects
          */
         public Builder httpClient(HttpClient client) {
             return transport(KeycardHttpTransport.of(client));

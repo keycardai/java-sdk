@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.InflaterInputStream;
 import org.jspecify.annotations.Nullable;
@@ -39,21 +40,10 @@ final class JdkHttpTransport implements KeycardHttpTransport {
     }
 
     @Override
-    public KeycardHttpTransport withoutRedirects() {
-        if (client.followRedirects() == HttpClient.Redirect.NEVER) {
-            return this;
+    public void requireRedirectsDisabled() {
+        if (client.followRedirects() != HttpClient.Redirect.NEVER) {
+            throw new ConfigurationException("A2A delegation requires HTTP redirects to be disabled");
         }
-        HttpClient.Builder builder = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .sslContext(client.sslContext())
-                .sslParameters(client.sslParameters())
-                .version(client.version());
-        client.authenticator().ifPresent(builder::authenticator);
-        client.connectTimeout().ifPresent(builder::connectTimeout);
-        client.cookieHandler().ifPresent(builder::cookieHandler);
-        client.executor().ifPresent(builder::executor);
-        client.proxy().ifPresent(builder::proxy);
-        return new JdkHttpTransport(builder.build());
     }
 
     @Override
@@ -63,18 +53,25 @@ final class JdkHttpTransport implements KeycardHttpTransport {
 
     @Override
     public TransportResponse sendUnbounded(TransportRequest request) {
-        return exchange(request, -1);
+        return exchange(request, -1, null);
     }
 
     @Override
     public TransportResponse sendWithLimit(TransportRequest request, int maxResponseBodyBytes) {
+        return sendWithLimit(request, maxResponseBodyBytes, null);
+    }
+
+    @Override
+    public TransportResponse sendWithLimit(
+            TransportRequest request, int maxResponseBodyBytes, @Nullable Consumer<TransportResponse> inspectResponse) {
         if (maxResponseBodyBytes <= 0) {
             throw new IllegalArgumentException("response limit must be positive");
         }
-        return exchange(request, maxResponseBodyBytes);
+        return exchange(request, maxResponseBodyBytes, inspectResponse);
     }
 
-    private TransportResponse exchange(TransportRequest request, int limit) {
+    private TransportResponse exchange(
+            TransportRequest request, int limit, @Nullable Consumer<TransportResponse> inspectResponse) {
         HttpRequest httpRequest = toHttpRequest(request);
         String host = request.uri().getHost();
         AtomicReference<InputStream> bodyStream = new AtomicReference<>();
@@ -83,7 +80,7 @@ final class JdkHttpTransport implements KeycardHttpTransport {
         CompletableFuture<HttpResponse<InputStream>> sent =
                 client.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
         CompletableFuture<TransportResponse> exchange =
-                sent.thenApplyAsync(response -> readResponse(response, bodyStream, limit));
+                sent.thenApplyAsync(response -> readResponse(response, bodyStream, limit, inspectResponse));
         try {
             return exchange.get(request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
@@ -121,7 +118,10 @@ final class JdkHttpTransport implements KeycardHttpTransport {
     }
 
     private static TransportResponse readResponse(
-            HttpResponse<InputStream> response, AtomicReference<InputStream> bodyStream, int limit) {
+            HttpResponse<InputStream> response,
+            AtomicReference<InputStream> bodyStream,
+            int limit,
+            @Nullable Consumer<TransportResponse> inspectResponse) {
         int status = response.statusCode();
         String encoding = response.headers()
                 .firstValue("content-encoding")
@@ -129,13 +129,20 @@ final class JdkHttpTransport implements KeycardHttpTransport {
                 .orElse("");
         InputStream raw = response.body();
         bodyStream.set(raw);
-        try (InputStream decoded = wrapEncoding(raw, encoding)) {
-            byte[] bytes = readBytes(
-                    decoded,
-                    status,
-                    response.headers().firstValue("retry-after").orElse(null),
-                    limit);
-            return new TransportResponse(status, response.headers().map(), new String(bytes, StandardCharsets.UTF_8));
+        try {
+            if (inspectResponse != null) {
+                inspectResponse.accept(
+                        new TransportResponse(status, response.headers().map(), ""));
+            }
+            try (InputStream decoded = wrapEncoding(raw, encoding)) {
+                byte[] bytes = readBytes(
+                        decoded,
+                        status,
+                        response.headers().firstValue("retry-after").orElse(null),
+                        limit);
+                return new TransportResponse(
+                        status, response.headers().map(), new String(bytes, StandardCharsets.UTF_8));
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } finally {

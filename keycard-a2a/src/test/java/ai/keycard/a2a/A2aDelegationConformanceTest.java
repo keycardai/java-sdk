@@ -466,9 +466,7 @@ class A2aDelegationConformanceTest {
                 DelegationClient delegation = status == 307
                         ? client(zone)
                         : clientBuilder(zone)
-                                .httpClient(HttpClient.newBuilder()
-                                        .followRedirects(HttpClient.Redirect.ALWAYS)
-                                        .build())
+                                .httpClient(HttpClient.newHttpClient())
                                 .build();
                 assertRedirectRefused(() -> invoke(delegation, agent.issuer()), other.issuer(), agent.issuer());
                 assertThat(other.requests()).isEmpty();
@@ -478,21 +476,35 @@ class A2aDelegationConformanceTest {
     }
 
     @Test
-    @DisplayName("row 16: a JDK transport wrapper does not follow an untrusted redirect")
-    void row16WrappedJdkTransport() {
+    @DisplayName("row 16: refuses an untrusted redirect before reading its oversized body")
+    void row16OversizedRedirect() {
         try (StubZone zone = zone();
                 StubZone agent = agent(CARD);
                 StubZone other = StubZone.start()) {
-            redirect(agent, 307, other.url("/next").toString());
-            HttpClient httpClient = HttpClient.newBuilder()
-                    .followRedirects(HttpClient.Redirect.ALWAYS)
-                    .build();
-            DelegationClient delegation = clientBuilder(zone)
-                    .transport(KeycardHttpTransport.of(httpClient))
-                    .build();
+            agent.respond(
+                    "POST",
+                    A2aProtocol.JSONRPC_PATH,
+                    new StubResponse(307, Map.of("Location", other.url("/next").toString()), "x".repeat(2048)));
+            DelegationClient delegation =
+                    clientBuilder(zone).maxPeerResponseBytes(1024).build();
             assertRedirectRefused(() -> invoke(delegation, agent.issuer()), other.issuer(), agent.issuer());
             assertThat(other.requests()).isEmpty();
-            assertInitialInvocation(zone, agent);
+        }
+    }
+
+    @Test
+    @DisplayName("row 16: a redirect-following JDK client is rejected before use")
+    void row16RejectsRedirectFollowingJdkClient() {
+        for (HttpClient.Redirect policy : List.of(HttpClient.Redirect.ALWAYS, HttpClient.Redirect.NORMAL)) {
+            HttpClient httpClient =
+                    HttpClient.newBuilder().followRedirects(policy).build();
+            DelegationClient.Builder builder = DelegationClient.builder(URI.create("https://zone.example"));
+            assertThatThrownBy(() -> builder.httpClient(httpClient))
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("requires HTTP redirects to be disabled");
+            assertThatThrownBy(() -> builder.transport(KeycardHttpTransport.of(httpClient)))
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("requires HTTP redirects to be disabled");
         }
     }
 
