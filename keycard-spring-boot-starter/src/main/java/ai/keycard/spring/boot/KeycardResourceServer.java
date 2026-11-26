@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.config.ObjectPostProcessor;
@@ -26,6 +27,7 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.BearerTokenError;
 import org.springframework.security.oauth2.server.resource.BearerTokenErrors;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
@@ -169,14 +171,19 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             if (resolver == null) {
                 resourceServer.jwt(jwt -> jwt.decoder(decoder));
             } else {
+                JwtAuthenticationConverter converter = http.getSharedObject(ApplicationContext.class)
+                        .getBeanProvider(JwtAuthenticationConverter.class)
+                        .getIfAvailable(JwtAuthenticationConverter::new);
                 resourceServer.authenticationManagerResolver(request -> authentication -> {
                     URI zone = resolveZone(resolver, request);
                     if (zone == null) {
                         throw new OAuth2AuthenticationException(
                                 BearerTokenErrors.invalidToken("the request's zone is not configured"));
                     }
-                    return new JwtAuthenticationProvider(((KeycardJwtDecoder) decoder).forZone(zone))
-                            .authenticate(authentication);
+                    JwtAuthenticationProvider provider =
+                            new JwtAuthenticationProvider(((KeycardJwtDecoder) decoder).forZone(zone));
+                    provider.setJwtAuthenticationConverter(converter);
+                    return provider.authenticate(authentication);
                 });
             }
             if (binding == null || binding.isLegacy()) {

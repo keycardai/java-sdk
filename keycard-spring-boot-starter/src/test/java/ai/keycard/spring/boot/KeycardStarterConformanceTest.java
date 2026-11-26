@@ -4,14 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import ai.keycard.mcp.AuthProvider;
+import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.oauth.AccessContext;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
+import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import com.nimbusds.jose.util.JSONObjectUtils;
+import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,8 +31,10 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.web.servlet.MockMvc;
@@ -256,6 +263,42 @@ class KeycardStarterConformanceTest {
                             .isEqualTo(404);
                 },
                 "keycard.resource-identifier=" + identifier);
+    }
+
+    @Test
+    @DisplayName("per-zone verification applies the application's JWT authority converter")
+    void perZoneAuthorityConverter() {
+        URI base = URI.create("https://keycard.example");
+        URI issuer = URI.create("https://a.keycard.example");
+        String resource = AUDIENCE + "/me";
+        AuthProvider provider = AuthProvider.builder(base)
+                .resourceIdentifiersByZone(Map.of("a", resource))
+                .transport(request -> {
+                    String body = request.uri().getPath().equals(StubZone.JWKS_PATH)
+                            ? new JWKSet(KEY.toPublicJWK()).toString()
+                            : JSONObjectUtils.toJSONString(
+                                    Map.of("issuer", issuer.toString(), "jwks_uri", issuer + StubZone.JWKS_PATH));
+                    return new TransportResponse(200, Map.of(), body);
+                })
+                .build();
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> List.of(new SimpleGrantedAuthority("SCOPE_admin")));
+        new WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(KeycardAutoConfiguration.class))
+                .withPropertyValues("keycard.zone-url=" + base)
+                .withBean(AuthProvider.class, () -> provider)
+                .withBean(ZoneResolver.class, () -> request -> issuer)
+                .withBean(JwtAuthenticationConverter.class, () -> converter)
+                .withUserConfiguration(ScopedChain.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                            .apply(SecurityMockMvcConfigurers.springSecurity())
+                            .build();
+                    MvcResult result = perform(mvc, "/me", token(issuer, "read", resource));
+                    assertThat(result.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(body(result)).contains("SCOPE_admin").doesNotContain("SCOPE_read");
+                });
     }
 
     @Test
@@ -569,9 +612,13 @@ class KeycardStarterConformanceTest {
     }
 
     private static String token(StubZone zone, String scope, String audience) {
+        return token(zone.issuer(), scope, audience);
+    }
+
+    private static String token(URI issuer, String scope, String audience) {
         long now = Instant.now().getEpochSecond();
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("iss", zone.issuer().toString());
+        claims.put("iss", issuer.toString());
         claims.put("sub", "user-1");
         claims.put("client_id", "client-1");
         claims.put("aud", List.of(audience));
