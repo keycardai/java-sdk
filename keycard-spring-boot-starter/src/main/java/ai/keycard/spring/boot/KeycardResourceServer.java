@@ -92,7 +92,8 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
     private final @Nullable ResourceBinding binding;
     private final @Nullable ProtectedResourceMetadataServlet protectedResourceMetadata;
     private final @Nullable ZoneResolver zoneResolver;
-    private final @Nullable BearerTokenIntrospection introspection;
+    private final @Nullable AuthProvider provider;
+    private final boolean introspect;
     private static final String PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
     private static final String VERIFIED_BEARER_ATTRIBUTE = KeycardResourceServer.class.getName() + ".verifiedBearer";
     private static final String PRESENT_BEARER_ATTRIBUTE = KeycardResourceServer.class.getName() + ".presentBearer";
@@ -116,7 +117,8 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         this.binding = null;
         this.protectedResourceMetadata = null;
         this.zoneResolver = null;
-        this.introspection = null;
+        this.provider = null;
+        this.introspect = false;
         System.getLogger(KeycardResourceServer.class.getName())
                 .log(
                         System.Logger.Level.WARNING,
@@ -139,12 +141,8 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         this.scopesSupported = List.copyOf(scopesSupported);
         this.binding = provider.resourceBinding();
         this.zoneResolver = binding.requiresZone() ? zoneResolver : null;
-        this.introspection = provider.bearerTokenIntrospection(introspect).orElse(null);
-        if (introspection != null
-                && (!(decoder instanceof KeycardJwtDecoder keycardDecoder)
-                        || !keycardDecoder.usesVerifier(provider.tokenVerifier()))) {
-            throw new ConfigurationException("introspection requires the provider's KeycardJwtDecoder");
-        }
+        this.provider = provider;
+        this.introspect = introspect;
         if (binding.requiresZone() && (zoneResolver == null || !(decoder instanceof KeycardJwtDecoder))) {
             throw new ConfigurationException(
                     "per-zone resource binding requires a request zone resolver and KeycardJwtDecoder");
@@ -169,12 +167,21 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
 
     @Override
     public void init(HttpSecurity http) {
+        AuthProvider configuredProvider = provider;
+        BearerTokenIntrospection check = configuredProvider == null
+                ? null
+                : configuredProvider.bearerTokenIntrospection(introspect).orElse(null);
+        if (configuredProvider != null
+                && check != null
+                && (!(decoder instanceof KeycardJwtDecoder keycardDecoder)
+                        || !keycardDecoder.usesVerifier(configuredProvider.tokenVerifier()))) {
+            throw new ConfigurationException("introspection requires the provider's KeycardJwtDecoder");
+        }
         if (binding != null && !binding.isLegacy() && decoder instanceof KeycardJwtDecoder keycardDecoder) {
             keycardDecoder.validate(binding);
         }
         AuthenticationEntryPoint challenge = challenge(binding, zoneResolver);
         BearerTokenAccessDeniedHandler denied = new BearerTokenAccessDeniedHandler();
-        BearerTokenIntrospection check = introspection;
         StrictBearerTokenResolver bearerResolver = new StrictBearerTokenResolver();
         http.oauth2ResourceServer(resourceServer -> {
             resourceServer

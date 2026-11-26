@@ -604,6 +604,41 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("a provider's introspection opt-in validates only chains that apply Keycard")
+    void unusedIntrospectionDoesNotValidateIndependentDecoder() {
+        try (StubZone zone = zone()) {
+            KeycardJwtDecoder independentDecoder = new KeycardJwtDecoder(
+                    TokenVerifier.builder(zone.issuer()).audiences(AUDIENCE).build());
+            var configured = runner(zone)
+                    .withBean(JwtDecoder.class, () -> independentDecoder::decode)
+                    .withBean(
+                            AuthProvider.class,
+                            () -> AuthProvider.builder(IntrospectionStub.issuer(zone))
+                                    .resourceIdentifier(AUDIENCE + "/me")
+                                    .credential(ClientSecret.of("owner", "secret"))
+                                    .introspect(true)
+                                    .transport(IntrospectionStub.transport(zone))
+                                    .build());
+            configured.withUserConfiguration(IndependentChain.class).run(context -> {
+                assertThat(context).hasNotFailed().hasSingleBean(KeycardResourceServer.class);
+                MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                        .apply(SecurityMockMvcConfigurers.springSecurity())
+                        .build();
+                assertThat(perform(mvc, "/me", token(zone, "read", AUDIENCE))
+                                .getResponse()
+                                .getStatus())
+                        .isEqualTo(200);
+                assertThat(zone.requests(PATH)).isEmpty();
+            });
+            configured.withUserConfiguration(DefaultChain.class).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasRootCauseMessage("introspection requires the provider's KeycardJwtDecoder");
+            });
+        }
+    }
+
+    @Test
     @DisplayName("an opaque JWT decoder remains supported in single-resource mode")
     void explicitBindingAllowsOpaqueDecoder() {
         try (StubZone zone = zone()) {
