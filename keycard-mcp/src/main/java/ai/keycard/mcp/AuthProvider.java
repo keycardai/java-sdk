@@ -50,12 +50,17 @@ public final class AuthProvider {
     private final ResourceBinding resourceBinding;
     private final KeycardHttpTransport metadataTransport;
     private final Duration metadataTimeout;
+    private final @Nullable Credential credential;
+    private final Clock clock;
+    private final @Nullable BearerTokenIntrospection introspection;
     private final TokenExchangeClient exchangeClient;
 
     private AuthProvider(Builder builder) {
         this.zoneUrl = builder.zoneUrl;
         this.metadataTransport = builder.transport;
         this.metadataTimeout = builder.fetchTimeout;
+        this.credential = builder.credential;
+        this.clock = builder.clock;
         this.resourceBinding = ResourceBinding.forVerifier(zoneUrl, builder.binding, List.of(builder.audiences));
         Set<URI> trusted = new LinkedHashSet<>();
         trusted.add(zoneUrl);
@@ -88,6 +93,7 @@ public final class AuthProvider {
             verifier.allowAnyAudience();
         }
         this.tokenVerifier = verifier.build();
+        this.introspection = builder.introspect ? createIntrospection(credential, metadataTimeout) : null;
         if (resourceBinding.isLegacy()) {
             ResourceBinding.warnLegacy();
         }
@@ -121,6 +127,27 @@ public final class AuthProvider {
      */
     public TokenVerifier tokenVerifier() {
         return tokenVerifier;
+    }
+
+    /**
+     * The bearer status check using this provider's application credential.
+     *
+     * @param required whether the integration explicitly enables introspection
+     * @return the status check, or empty when neither the provider nor the integration enables it
+     * @throws ConfigurationException if introspection is enabled without a suitable credential
+     */
+    public Optional<BearerTokenIntrospection> bearerTokenIntrospection(boolean required) {
+        return Optional.ofNullable(
+                introspection != null || !required ? introspection : createIntrospection(credential, metadataTimeout));
+    }
+
+    BearerTokenIntrospection createIntrospection(@Nullable Credential override, @Nullable Duration timeout) {
+        return new BearerTokenIntrospection(
+                issuers,
+                override == null ? credential : override,
+                metadataTransport,
+                timeout == null ? metadataTimeout : timeout,
+                clock);
     }
 
     /**
@@ -293,6 +320,7 @@ public final class AuthProvider {
         private final URI zoneUrl;
         private final ResourceBinding.Options binding = new ResourceBinding.Options();
         private @Nullable Credential credential;
+        private boolean introspect;
         private String[] audiences = new String[0];
         private KeycardHttpTransport transport = KeycardHttpTransport.create();
         private Duration fetchTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
@@ -303,7 +331,7 @@ public final class AuthProvider {
         }
 
         /**
-         * The application credential that authenticates token exchanges. Without one, grants
+         * The application credential that authenticates token exchanges and opt-in introspection. Without one, grants
          * record a configuration error per resource.
          *
          * @param credential the credential; a multi-zone {@link ClientSecret} makes the provider
@@ -312,6 +340,18 @@ public final class AuthProvider {
          */
         public Builder credential(Credential credential) {
             this.credential = Objects.requireNonNull(credential, "credential");
+            return this;
+        }
+
+        /**
+         * Enables an uncached status check for locally verified bearer tokens. The credential must
+         * authenticate the Application that owns the protected Resource.
+         *
+         * @param enabled whether to introspect; defaults to {@code false}
+         * @return this builder
+         */
+        public Builder introspect(boolean enabled) {
+            this.introspect = enabled;
             return this;
         }
 

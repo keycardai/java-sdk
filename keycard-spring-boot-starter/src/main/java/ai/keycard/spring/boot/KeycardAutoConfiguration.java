@@ -74,7 +74,9 @@ public class KeycardAutoConfiguration {
         if (properties.resourceIdentifiersByZone() != null) {
             builder.resourceIdentifiersByZone(properties.resourceIdentifiersByZone());
         }
-        builder.multiResource(properties.multiResource()).allowAnyAudience(properties.allowAnyAudience());
+        builder.multiResource(properties.multiResource())
+                .allowAnyAudience(properties.allowAnyAudience())
+                .introspect(properties.introspect());
         Credential configured = credential.getIfAvailable();
         if (configured != null) {
             builder.credential(configured);
@@ -122,7 +124,8 @@ public class KeycardAutoConfiguration {
                 provider,
                 provider.resourceBinding().requiresZone() ? zoneResolver.getIfAvailable() : null,
                 contextPath,
-                properties.metadataForwarded());
+                properties.metadataForwarded(),
+                properties.introspect());
     }
 
     /**

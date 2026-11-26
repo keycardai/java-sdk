@@ -2,9 +2,11 @@ package ai.keycard.mcp;
 
 import ai.keycard.oauth.AccessToken;
 import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.InvalidTokenException;
 import ai.keycard.oauth.JwksException;
 import ai.keycard.oauth.KeycardException;
+import ai.keycard.oauth.KeycardHttpTransport;
 import ai.keycard.oauth.TokenVerifier;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
@@ -15,6 +17,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,6 +74,7 @@ public final class RequireBearerAuthFilter implements Filter {
     private final @Nullable ZoneResolver zoneResolver;
     private final ResourceBinding binding;
     private final boolean authenticationRequired;
+    private final @Nullable BearerTokenIntrospection introspection;
 
     private RequireBearerAuthFilter(Builder builder, ResourceBinding binding) {
         this.verifier = builder.verifier;
@@ -77,6 +82,7 @@ public final class RequireBearerAuthFilter implements Filter {
         this.zoneResolver = builder.zoneResolver;
         this.binding = binding;
         this.authenticationRequired = builder.authenticationRequired;
+        this.introspection = builder.introspection();
     }
 
     /**
@@ -99,6 +105,7 @@ public final class RequireBearerAuthFilter implements Filter {
     public static Builder builder(AuthProvider provider) {
         Builder builder = new Builder(provider.tokenVerifier());
         builder.sharedBinding = provider.resourceBinding();
+        builder.provider = provider;
         return builder;
     }
 
@@ -119,13 +126,13 @@ public final class RequireBearerAuthFilter implements Filter {
         // only this instance's scopes are left to check. Request attributes are server-side, so a
         // client can't set this one.
         AccessToken verified = KeycardRequest.accessToken(request).orElse(null);
-        if (verified != null && binding.isLegacy()) {
+        if (verified != null && binding.isLegacy() && introspection == null) {
             if (hasRequiredScopes(request, response, verified)) {
                 chain.doFilter(request, response);
             }
             return;
         }
-        if (!binding.isLegacy()) {
+        if (!binding.isLegacy() || introspection != null) {
             request.removeAttribute(KeycardRequest.ACCESS_TOKEN_ATTRIBUTE);
         }
 
@@ -170,6 +177,19 @@ public final class RequireBearerAuthFilter implements Filter {
         if (!hasRequiredScopes(request, response, token)) {
             return;
         }
+        if (introspection != null) {
+            switch (introspection.check(token.issuer(), token.token())) {
+                case INACTIVE -> {
+                    BearerChallenge.challenge(request, response, 401, "invalid_token", "the access token is inactive");
+                    return;
+                }
+                case UNAVAILABLE -> {
+                    BearerTokenIntrospection.unavailable(response);
+                    return;
+                }
+                case ACTIVE -> {}
+            }
+        }
         request.setAttribute(KeycardRequest.ACCESS_TOKEN_ATTRIBUTE, token);
         chain.doFilter(request, response);
     }
@@ -204,13 +224,88 @@ public final class RequireBearerAuthFilter implements Filter {
         private final TokenVerifier verifier;
         private final ResourceBinding.Options options = new ResourceBinding.Options();
         private @Nullable ResourceBinding sharedBinding;
+        private @Nullable AuthProvider provider;
         private @Nullable URI baseIssuer;
+        private @Nullable Boolean introspect;
+        private @Nullable Credential credential;
+        private @Nullable Duration introspectionTimeout;
+        private @Nullable KeycardHttpTransport introspectionTransport;
         private Set<String> requiredScopes = Set.of();
         private @Nullable ZoneResolver zoneResolver;
         private boolean authenticationRequired = true;
 
         private Builder(TokenVerifier verifier) {
             this.verifier = Objects.requireNonNull(verifier, "verifier");
+        }
+
+        /**
+         * Enables the uncached status check after local verification and required scope checks.
+         *
+         * @param enabled whether to introspect; by default inherits the provider setting, or false
+         *     for a standalone verifier
+         * @return this builder
+         */
+        public Builder introspect(boolean enabled) {
+            this.introspect = enabled;
+            return this;
+        }
+
+        /**
+         * Sets the credential of the Application that owns the protected Resource.
+         *
+         * @param credential the credential for introspection; defaults to the provider's credential
+         * @return this builder
+         */
+        public Builder credential(Credential credential) {
+            this.credential = Objects.requireNonNull(credential, "credential");
+            return this;
+        }
+
+        /**
+         * Sets the timeout per discovery or introspection request.
+         *
+         * @param timeout the timeout; defaults to the provider's fetch timeout or ten seconds
+         * @return this builder
+         */
+        public Builder introspectionTimeout(Duration timeout) {
+            this.introspectionTimeout = Objects.requireNonNull(timeout, "timeout");
+            return this;
+        }
+
+        /**
+         * Sets the HTTPS transport for a standalone filter's introspection requests.
+         *
+         * @param transport the transport, with redirects disabled
+         * @return this builder
+         */
+        public Builder introspectionTransport(KeycardHttpTransport transport) {
+            requireStandalone();
+            this.introspectionTransport = Objects.requireNonNull(transport, "transport");
+            return this;
+        }
+
+        private @Nullable BearerTokenIntrospection introspection() {
+            if (Boolean.FALSE.equals(introspect)) {
+                return null;
+            }
+            if (provider != null) {
+                BearerTokenIntrospection inherited =
+                        provider.bearerTokenIntrospection(false).orElse(null);
+                if (inherited == null && introspect == null) {
+                    return null;
+                }
+                return inherited != null && credential == null && introspectionTimeout == null
+                        ? inherited
+                        : provider.createIntrospection(credential, introspectionTimeout);
+            }
+            return Boolean.TRUE.equals(introspect)
+                    ? new BearerTokenIntrospection(
+                            verifier.issuers(),
+                            credential,
+                            introspectionTransport == null ? KeycardHttpTransport.create() : introspectionTransport,
+                            introspectionTimeout == null ? KeycardHttpTransport.DEFAULT_TIMEOUT : introspectionTimeout,
+                            Clock.systemUTC())
+                    : null;
         }
 
         /**

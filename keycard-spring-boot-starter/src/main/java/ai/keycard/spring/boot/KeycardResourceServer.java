@@ -2,6 +2,7 @@ package ai.keycard.spring.boot;
 
 import ai.keycard.mcp.AuthProvider;
 import ai.keycard.mcp.AuthorizationServerMetadataServlet;
+import ai.keycard.mcp.BearerTokenIntrospection;
 import ai.keycard.mcp.ProtectedResourceMetadataServlet;
 import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.mcp.ResourceBinding;
@@ -24,6 +25,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.BearerTokenError;
 import org.springframework.security.oauth2.server.resource.BearerTokenErrors;
@@ -33,6 +35,7 @@ import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthen
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.preauth.x509.X509AuthenticationFilter;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -81,7 +84,9 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
     private final @Nullable ResourceBinding binding;
     private final @Nullable ProtectedResourceMetadataServlet protectedResourceMetadata;
     private final @Nullable ZoneResolver zoneResolver;
+    private final @Nullable BearerTokenIntrospection introspection;
     private static final String PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
+    private static final String VERIFIED_BEARER_ATTRIBUTE = KeycardResourceServer.class.getName() + ".verifiedBearer";
 
     /**
      * A configurer for one zone.
@@ -102,6 +107,7 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
         this.binding = null;
         this.protectedResourceMetadata = null;
         this.zoneResolver = null;
+        this.introspection = null;
         System.getLogger(KeycardResourceServer.class.getName())
                 .log(
                         System.Logger.Level.WARNING,
@@ -116,13 +122,21 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             AuthProvider provider,
             @Nullable ZoneResolver zoneResolver,
             String contextPath,
-            boolean metadataForwarded) {
+            boolean metadataForwarded,
+            boolean introspect) {
         this.zoneUrl = zoneUrl;
         this.decoder = decoder;
         this.resourceName = resourceName;
         this.scopesSupported = List.copyOf(scopesSupported);
         this.binding = provider.resourceBinding();
         this.zoneResolver = binding.requiresZone() ? zoneResolver : null;
+        this.introspection =
+                introspect ? provider.bearerTokenIntrospection(true).orElseThrow() : null;
+        if (introspection != null
+                && (!(decoder instanceof KeycardJwtDecoder keycardDecoder)
+                        || !keycardDecoder.usesVerifier(provider.tokenVerifier()))) {
+            throw new ConfigurationException("introspection requires the provider's KeycardJwtDecoder");
+        }
         if (binding.requiresZone() && (zoneResolver == null || !(decoder instanceof KeycardJwtDecoder))) {
             throw new ConfigurationException(
                     "per-zone resource binding requires a request zone resolver and KeycardJwtDecoder");
@@ -171,20 +185,31 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
                         }
                     });
             ZoneResolver resolver = zoneResolver;
-            if (resolver == null) {
+            if (resolver == null && introspection == null) {
                 resourceServer.jwt(jwt -> jwt.decoder(decoder));
             } else {
                 JwtAuthenticationConverter converter = http.getSharedObject(ApplicationContext.class)
                         .getBeanProvider(JwtAuthenticationConverter.class)
                         .getIfAvailable(JwtAuthenticationConverter::new);
                 resourceServer.authenticationManagerResolver(request -> authentication -> {
-                    URI zone = resolveZone(resolver, request);
-                    if (zone == null) {
-                        throw new OAuth2AuthenticationException(
-                                BearerTokenErrors.invalidToken("the request's zone is not configured"));
+                    JwtDecoder requestDecoder = decoder;
+                    if (resolver != null) {
+                        URI zone = resolveZone(resolver, request);
+                        if (zone == null) {
+                            throw new OAuth2AuthenticationException(
+                                    BearerTokenErrors.invalidToken("the request's zone is not configured"));
+                        }
+                        requestDecoder = ((KeycardJwtDecoder) decoder).forZone(zone);
                     }
-                    JwtAuthenticationProvider provider =
-                            new JwtAuthenticationProvider(((KeycardJwtDecoder) decoder).forZone(zone));
+                    JwtDecoder selected = requestDecoder;
+                    JwtAuthenticationProvider provider = new JwtAuthenticationProvider(
+                            introspection == null
+                                    ? selected
+                                    : token -> {
+                                        Jwt jwt = selected.decode(token);
+                                        request.setAttribute(VERIFIED_BEARER_ATTRIBUTE, jwt);
+                                        return jwt;
+                                    });
                     provider.setJwtAuthenticationConverter(converter);
                     return provider.authenticate(authentication);
                 });
@@ -201,6 +226,37 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             }
         });
         http.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(challenge));
+        BearerTokenIntrospection check = introspection;
+        if (check != null) {
+            http.addFilterAfter(
+                    new OncePerRequestFilter() {
+                        @Override
+                        protected void doFilterInternal(
+                                HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+                                throws ServletException, IOException {
+                            Object verified = request.getAttribute(VERIFIED_BEARER_ATTRIBUTE);
+                            if (verified instanceof Jwt jwt) {
+                                switch (check.check(jwt.getClaimAsString("iss"), jwt.getTokenValue())) {
+                                    case INACTIVE -> {
+                                        challenge.commence(
+                                                request,
+                                                response,
+                                                new OAuth2AuthenticationException(BearerTokenErrors.invalidToken(
+                                                        "the access token is inactive")));
+                                        return;
+                                    }
+                                    case UNAVAILABLE -> {
+                                        BearerTokenIntrospection.unavailable(response);
+                                        return;
+                                    }
+                                    case ACTIVE -> {}
+                                }
+                            }
+                            chain.doFilter(request, response);
+                        }
+                    },
+                    AuthorizationFilter.class);
+        }
         http.addFilterBefore(authorizationServerMetadata, BearerTokenAuthenticationFilter.class);
         ProtectedResourceMetadataServlet metadata = protectedResourceMetadata;
         if (binding != null && !binding.isLegacy()) {

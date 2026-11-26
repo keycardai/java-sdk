@@ -55,6 +55,10 @@ public final class KeycardJwtDecoder implements JwtDecoder {
         binding.validate(verifier);
     }
 
+    boolean usesVerifier(TokenVerifier verifier) {
+        return this.verifier == verifier;
+    }
+
     @Override
     public Jwt decode(String token) throws JwtException {
         AccessToken verified;
