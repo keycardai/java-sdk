@@ -97,7 +97,7 @@ class WorkloadIdentityConformanceTest {
         });
 
         WorkloadIdentityRuntimeException typed = new WorkloadIdentityRuntimeException(
-                "spire down", "spiffe", new NetworkException("x", new IOException()));
+                "spire down", "spiffe", new NetworkException("x", new IOException()), true);
         WorkloadIdentity passthrough = WorkloadIdentity.of(() -> {
             throw typed;
         });

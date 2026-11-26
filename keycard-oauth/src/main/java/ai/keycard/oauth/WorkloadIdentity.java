@@ -127,8 +127,7 @@ public final class WorkloadIdentity implements Credential, ClientAuthenticator {
             throw new WorkloadIdentityRuntimeException(
                     "the identity token source failed: " + e.getClass().getSimpleName(),
                     WorkloadIdentityRuntimeException.SOURCE_CUSTOM,
-                    e,
-                    false);
+                    e);
         }
         if (token == null || token.isEmpty()) {
             throw new WorkloadIdentityRuntimeException(
