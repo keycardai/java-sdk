@@ -1,3 +1,17 @@
+## v0.7.1 (2026-11-26)
+
+
+- fix(a2a): enforce trusted invocation redirect origins (#36)
+- * fix(a2a): enforce trusted invocation redirect origins
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(a2a): guard redirects in wrapped JDK transports
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(a2a): reject redirect-following clients and inspect response headers first
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.7.0 (2026-11-26)
 
 
