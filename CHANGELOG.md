@@ -1,3 +1,10 @@
+## v0.5.1 (2026-11-26)
+
+
+- fix(oauth): retry an oversized 2xx metadata response without a delay (#28)
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Larry Osakwe <larry@keycard.ai>
+
 ## v0.5.0 (2026-11-25)
 
 
