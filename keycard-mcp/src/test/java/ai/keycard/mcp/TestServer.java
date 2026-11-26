@@ -53,6 +53,13 @@ final class TestServer implements AutoCloseable {
         return this;
     }
 
+    TestServer eagerServlet(String path, HttpServlet servlet) {
+        ServletHolder holder = new ServletHolder(servlet);
+        holder.setInitOrder(0);
+        context.addServlet(holder, path);
+        return this;
+    }
+
     TestServer filter(String path, Filter filter) {
         context.addFilter(new FilterHolder(filter), path, EnumSet.of(DispatcherType.REQUEST));
         return this;
@@ -152,9 +159,13 @@ final class TestServer implements AutoCloseable {
     }
 
     static String tokenWithAudienceClaim(StubZone zone, String scope, Object audience, String kid) {
+        return tokenWithAudienceClaim(zone.issuer(), scope, audience, kid);
+    }
+
+    static String tokenWithAudienceClaim(URI issuer, String scope, Object audience, String kid) {
         long now = Instant.now().getEpochSecond();
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("iss", zone.issuer().toString());
+        claims.put("iss", issuer.toString());
         claims.put("sub", "user-1");
         claims.put("sub_profile", "user");
         claims.put("keycard_app_id", "app-1");

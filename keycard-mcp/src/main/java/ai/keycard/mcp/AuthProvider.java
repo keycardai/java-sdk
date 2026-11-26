@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -30,10 +31,10 @@ import org.jspecify.annotations.Nullable;
  * <pre>{@code
  * AuthProvider provider = AuthProvider.builder(URI.create("https://acme.keycard.cloud"))
  *         .credential(ClientSecret.of(clientId, clientSecret))
- *         .audiences("https://mcp.example.com/mcp")
+ *         .resourceIdentifier("https://mcp.example.com/mcp")
  *         .build();
  *
- * context.addFilter(new FilterHolder(RequireBearerAuthFilter.builder(provider.tokenVerifier()).build()), "/mcp/*", REQUEST);
+ * context.addFilter(new FilterHolder(RequireBearerAuthFilter.builder(provider).build()), "/mcp/*", REQUEST);
  * context.addFilter(new FilterHolder(provider.grant("https://api.example.com")), "/mcp/*", REQUEST);
  * }</pre>
  *
@@ -46,14 +47,29 @@ public final class AuthProvider {
     private final URI zoneUrl;
     private final List<URI> issuers;
     private final TokenVerifier tokenVerifier;
+    private final ResourceBinding resourceBinding;
+    private final KeycardHttpTransport metadataTransport;
+    private final Duration metadataTimeout;
     private final TokenExchangeClient exchangeClient;
 
     private AuthProvider(Builder builder) {
         this.zoneUrl = builder.zoneUrl;
+        this.metadataTransport = builder.transport;
+        this.metadataTimeout = builder.fetchTimeout;
+        this.resourceBinding = ResourceBinding.forVerifier(zoneUrl, builder.binding, List.of(builder.audiences));
         Set<URI> trusted = new LinkedHashSet<>();
         trusted.add(zoneUrl);
         if (builder.credential instanceof ClientSecret secret) {
             trusted.addAll(secret.zones());
+        }
+        Map<URI, String> zonalAudiences = resourceBinding.zonalAudiences();
+        if (!zonalAudiences.isEmpty()) {
+            if (builder.credential instanceof ClientSecret secret
+                    && !zonalAudiences.keySet().containsAll(secret.zones())) {
+                throw new ConfigurationException(
+                        "resourceIdentifiersByZone must cover every trusted credential issuer");
+            }
+            trusted = new LinkedHashSet<>(zonalAudiences.keySet());
         }
         this.issuers = List.copyOf(trusted);
 
@@ -61,10 +77,17 @@ public final class AuthProvider {
                 .transport(builder.transport)
                 .fetchTimeout(builder.fetchTimeout)
                 .clock(builder.clock);
-        if (builder.audiences.length > 0) {
-            verifier.audiences(builder.audiences);
+        if (resourceBinding.requiresZone()) {
+            verifier.audiencesByIssuer(zonalAudiences);
+        } else if (!resourceBinding.expectedAudiences().isEmpty()) {
+            verifier.audiences(resourceBinding.expectedAudiences().toArray(String[]::new));
+        } else {
+            verifier.allowAnyAudience();
         }
         this.tokenVerifier = verifier.build();
+        if (resourceBinding.isLegacy()) {
+            ResourceBinding.warnLegacy();
+        }
 
         TokenExchangeClient.Builder exchange = TokenExchangeClient.builder(zoneUrl)
                 .transport(builder.transport)
@@ -94,6 +117,33 @@ public final class AuthProvider {
      */
     public TokenVerifier tokenVerifier() {
         return tokenVerifier;
+    }
+
+    /**
+     * The resource binding shared by verification, challenges and discovery.
+     *
+     * @return the configured resource binding
+     */
+    public ResourceBinding resourceBinding() {
+        return resourceBinding;
+    }
+
+    /**
+     * Configures a protected-resource servlet with this provider's resource binding.
+     *
+     * @return the metadata servlet builder
+     */
+    public ProtectedResourceMetadataServlet.Builder protectedResourceMetadata() {
+        return ProtectedResourceMetadataServlet.builder(zoneUrl, resourceBinding);
+    }
+
+    /**
+     * Creates a proxy for this provider's configured authorization server metadata.
+     *
+     * @return the metadata proxy servlet
+     */
+    public AuthorizationServerMetadataServlet authorizationServerMetadata() {
+        return AuthorizationServerMetadataServlet.of(zoneUrl, resourceBinding, metadataTransport, metadataTimeout);
     }
 
     /**
@@ -237,6 +287,7 @@ public final class AuthProvider {
     public static final class Builder {
 
         private final URI zoneUrl;
+        private final ResourceBinding.Options binding = new ResourceBinding.Options();
         private @Nullable Credential credential;
         private String[] audiences = new String[0];
         private KeycardHttpTransport transport = KeycardHttpTransport.create();
@@ -272,6 +323,51 @@ public final class AuthProvider {
                 throw new ConfigurationException("audiences must not be empty");
             }
             this.audiences = audiences.clone();
+            return this;
+        }
+
+        /**
+         * Binds verification and discovery to one exact HTTP(S) URL or URN.
+         *
+         * @param identifier the resource identifier, preserved verbatim
+         * @return this builder
+         */
+        public Builder resourceIdentifier(String identifier) {
+            binding.identifier(identifier);
+            return this;
+        }
+
+        /**
+         * Binds each zone ID to an exact resource identifier. The builder's URL is the base
+         * issuer used to derive the trusted zone issuers.
+         *
+         * @param identifiers the resource identifier of each configured zone
+         * @return this builder
+         */
+        public Builder resourceIdentifiersByZone(Map<String, String> identifiers) {
+            binding.identifiersByZone(identifiers);
+            return this;
+        }
+
+        /**
+         * Enables list-based verification, with discovery only for a shared zone identifier.
+         *
+         * @param enabled whether to use the audience list explicitly
+         * @return this builder
+         */
+        public Builder multiResource(boolean enabled) {
+            binding.multiResource(enabled);
+            return this;
+        }
+
+        /**
+         * Skips audience checking while retaining all other verification and disabling discovery.
+         *
+         * @param enabled whether to skip the audience check
+         * @return this builder
+         */
+        public Builder allowAnyAudience(boolean enabled) {
+            binding.allowAnyAudience(enabled);
             return this;
         }
 

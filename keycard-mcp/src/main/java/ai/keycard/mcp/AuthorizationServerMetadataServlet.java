@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Proxies the zone's RFC 8414 authorization-server metadata, for clients that look for it on the
@@ -23,9 +24,13 @@ import java.util.Objects;
 public final class AuthorizationServerMetadataServlet extends HttpServlet {
 
     private static final long serialVersionUID = 1L;
+    private static final String PATH = "/.well-known/oauth-authorization-server";
 
-    /** The upstream metadata URL. */
-    private final URI upstream;
+    /** The upstream issuer, or the base issuer in zone-scoped mode. */
+    private final URI issuer;
+
+    /** The configured zones for a zone-scoped proxy. */
+    private final @Nullable ResourceBinding binding;
 
     /** The bound on the upstream fetch. */
     private final Duration timeout;
@@ -34,6 +39,18 @@ public final class AuthorizationServerMetadataServlet extends HttpServlet {
     private final transient KeycardHttpTransport transport;
 
     private AuthorizationServerMetadataServlet(URI issuer, KeycardHttpTransport transport, Duration timeout) {
+        this(issuer, null, transport, timeout);
+    }
+
+    private AuthorizationServerMetadataServlet(
+            URI issuer, @Nullable ResourceBinding binding, KeycardHttpTransport transport, Duration timeout) {
+        this.issuer = issuer;
+        this.binding = binding;
+        this.transport = transport;
+        this.timeout = timeout;
+    }
+
+    private static URI upstream(URI issuer) {
         String base = issuer.toString();
         String path = issuer.getRawPath() == null ? "" : issuer.getRawPath();
         if (path.endsWith("/")) {
@@ -43,9 +60,7 @@ public final class AuthorizationServerMetadataServlet extends HttpServlet {
                 0,
                 base.length()
                         - (issuer.getRawPath() == null ? 0 : issuer.getRawPath().length()));
-        this.upstream = URI.create(origin + "/.well-known/oauth-authorization-server" + path);
-        this.transport = transport;
-        this.timeout = timeout;
+        return URI.create(origin + PATH + path);
     }
 
     /**
@@ -73,13 +88,38 @@ public final class AuthorizationServerMetadataServlet extends HttpServlet {
                 Objects.requireNonNull(timeout, "timeout"));
     }
 
+    static AuthorizationServerMetadataServlet of(
+            URI issuer, ResourceBinding binding, KeycardHttpTransport transport, Duration timeout) {
+        return new AuthorizationServerMetadataServlet(issuer, binding, transport, timeout);
+    }
+
+    private @Nullable URI selectedIssuer(HttpServletRequest request) {
+        if (binding == null) {
+            return issuer;
+        }
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        if (!binding.requiresZone() && !binding.sharedDiscovery()) {
+            return path.equals(PATH) ? issuer : null;
+        }
+        if (!path.startsWith(PATH + "/")) {
+            return null;
+        }
+        String zoneId = path.substring(PATH.length() + 1).split("/", 2)[0];
+        return binding.issuer(zoneId).orElse(null);
+    }
+
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        URI selected = selectedIssuer(request);
+        if (selected == null) {
+            response.sendError(404);
+            return;
+        }
         Cors.allow(response);
         TransportResponse upstreamResponse;
         try {
-            upstreamResponse =
-                    transport.send(TransportRequest.get(upstream, timeout).withHeader("Accept", "application/json"));
+            upstreamResponse = transport.send(
+                    TransportRequest.get(upstream(selected), timeout).withHeader("Accept", "application/json"));
         } catch (KeycardException e) {
             BearerChallenge.json(response, 502, "{\"error\":\"bad_gateway\"}");
             return;
@@ -92,7 +132,11 @@ public final class AuthorizationServerMetadataServlet extends HttpServlet {
     }
 
     @Override
-    protected void doOptions(HttpServletRequest request, HttpServletResponse response) {
-        Cors.preflight(response);
+    protected void doOptions(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        if (selectedIssuer(request) != null) {
+            Cors.preflight(response);
+        } else {
+            response.sendError(404);
+        }
     }
 }
