@@ -24,7 +24,7 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** authorization-server-discovery.md (spec-version 3), Unit Tests table and Errors table. */
+/** authorization-server-discovery.md (spec-version 7), Unit Tests table and Errors table. */
 class AuthorizationServerDiscoveryConformanceTest {
 
     private final AuthorizationServerDiscovery discovery = AuthorizationServerDiscovery.create();
@@ -150,6 +150,10 @@ class AuthorizationServerDiscoveryConformanceTest {
                             "revocation_endpoint",
                             "relative/path",
                             "revocation_endpoint_auth_methods_supported",
+                            List.of(1),
+                            "introspection_endpoint",
+                            "relative/path",
+                            "introspection_endpoint_auth_methods_supported",
                             List.of(1))
                     .entrySet()) {
                 Map<String, Object> doc = document(zone);
@@ -245,6 +249,44 @@ class AuthorizationServerDiscoveryConformanceTest {
 
             assertThat(metadata.revocationEndpoint()).isNull();
             assertThat(metadata.revocationEndpointAuthMethodsSupported()).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("row 14: introspection endpoint and authentication methods are typed")
+    void row14() {
+        try (StubZone zone = StubZone.start()) {
+            URI endpoint = zone.url("/oauth/2/introspect");
+            List<String> methods = List.of("client_secret_basic", "client_secret_post", "private_key_jwt");
+            List<String> algs = List.of("RS256", "ES256", "ES384", "ES512");
+            Map<String, Object> doc = document(zone);
+            doc.put("introspection_endpoint", endpoint.toString());
+            doc.put("introspection_endpoint_auth_methods_supported", methods);
+            doc.put("introspection_endpoint_auth_signing_alg_values_supported", algs);
+            serve(zone, doc);
+
+            AuthorizationServerMetadata metadata = discovery.discover(zone.issuer());
+
+            assertThat(metadata.introspectionEndpoint()).isEqualTo(endpoint);
+            assertThat(metadata.introspectionEndpointAuthMethodsSupported()).containsExactlyElementsOf(methods);
+            assertThat(metadata.get("introspection_endpoint")).isEqualTo(endpoint.toString());
+            assertThat(metadata.get("introspection_endpoint_auth_methods_supported"))
+                    .isEqualTo(methods);
+            assertThat(metadata.get("introspection_endpoint_auth_signing_alg_values_supported"))
+                    .isEqualTo(algs);
+        }
+    }
+
+    @Test
+    @DisplayName("row 15: omitted introspection fields are absent without error")
+    void row15() {
+        try (StubZone zone = StubZone.start()) {
+            serve(zone, document(zone));
+
+            AuthorizationServerMetadata metadata = discovery.discover(zone.issuer());
+
+            assertThat(metadata.introspectionEndpoint()).isNull();
+            assertThat(metadata.introspectionEndpointAuthMethodsSupported()).isEmpty();
         }
     }
 
