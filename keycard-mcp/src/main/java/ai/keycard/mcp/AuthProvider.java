@@ -77,6 +77,9 @@ public final class AuthProvider {
                 .transport(builder.transport)
                 .fetchTimeout(builder.fetchTimeout)
                 .clock(builder.clock);
+        if (!resourceBinding.isLegacy()) {
+            verifier.requireExplicitResourceBinding();
+        }
         if (resourceBinding.requiresZone()) {
             verifier.audiencesByIssuer(zonalAudiences);
         } else if (!resourceBinding.expectedAudiences().isEmpty()) {
@@ -110,8 +113,9 @@ public final class AuthProvider {
     }
 
     /**
-     * The verifier for inbound bearer tokens, trusting every zone this provider serves. Pass it to
-     * {@link RequireBearerAuthFilter#builder(TokenVerifier)}.
+     * The verifier for inbound bearer tokens, trusting every zone this provider serves.
+     * Build servlet filters with {@link RequireBearerAuthFilter#builder(AuthProvider)} to share
+     * this provider's audience and discovery binding.
      *
      * @return the shared verifier
      */

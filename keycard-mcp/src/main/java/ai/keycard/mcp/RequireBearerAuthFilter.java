@@ -80,7 +80,8 @@ public final class RequireBearerAuthFilter implements Filter {
     }
 
     /**
-     * A builder for a filter verifying with {@code verifier}.
+     * A builder for a filter verifying with a standalone {@code verifier}.
+     * For a provider's verifier, prefer {@link #builder(AuthProvider)}.
      *
      * @param verifier the token verifier, built with this server's audience
      * @return a new builder
@@ -308,7 +309,7 @@ public final class RequireBearerAuthFilter implements Filter {
          * @return the filter
          * @throws ConfigurationException when the verifier trusts more than one zone and no zone
          *     resolver is set: each request must be verified against its own zone, never any
-         *     trusted one
+         *     trusted one, or when the resource binding is incompatible with the verifier
          */
         public RequireBearerAuthFilter build() {
             ResourceBinding binding = sharedBinding != null

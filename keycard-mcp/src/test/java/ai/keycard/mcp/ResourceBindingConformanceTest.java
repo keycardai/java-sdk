@@ -190,6 +190,20 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
+    @DisplayName("a provider verifier cannot fall back to request-derived discovery")
+    void providerVerifierRequiresBinding() {
+        AuthProvider provider =
+                AuthProvider.builder(BASE).resourceIdentifier(RESOURCE).build();
+        assertThatThrownBy(() -> RequireBearerAuthFilter.builder(provider.tokenVerifier())
+                        .build())
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("this verifier requires an explicit resource binding");
+        try (TestServer server = protect(RequireBearerAuthFilter.builder(provider))) {
+            assertChallenge(server.get("/mcp"), 401, ORIGIN + METADATA + "/mcp");
+        }
+    }
+
+    @Test
     @DisplayName("bearer rows 16, 16a and 16c: the request selects the zone before verification")
     void distinctZones() {
         try (TestServer server =

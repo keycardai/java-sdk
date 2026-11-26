@@ -35,6 +35,7 @@ public final class TokenVerifier {
     private final List<URI> issuers;
     private final String[] audiences;
     private final Map<URI, String> audiencesByIssuer;
+    private final boolean explicitResourceBindingRequired;
     private final String[] algorithms;
     private final Duration clockSkew;
     private final Clock clock;
@@ -46,6 +47,7 @@ public final class TokenVerifier {
         this.issuers = List.copyOf(builder.issuers);
         this.audiences = builder.audiences;
         this.audiencesByIssuer = builder.audiencesByIssuer;
+        this.explicitResourceBindingRequired = builder.explicitResourceBindingRequired;
         this.algorithms = builder.algorithms;
         this.clockSkew = builder.clockSkew;
         this.clock = builder.clock;
@@ -149,6 +151,15 @@ public final class TokenVerifier {
         return audiencesByIssuer;
     }
 
+    /**
+     * Whether a resource server using this verifier must supply an explicit resource binding.
+     *
+     * @return true when implicit resource discovery and challenges are not allowed
+     */
+    public boolean explicitResourceBindingRequired() {
+        return explicitResourceBindingRequired;
+    }
+
     private JwtVerifier jwtVerifier(List<URI> trusted, String[] expectedAudiences) {
         JwtVerifier.Builder builder = JwtVerifier.builder(trusted.toArray(URI[]::new))
                 .algorithms(algorithms)
@@ -168,6 +179,7 @@ public final class TokenVerifier {
         private String[] audiences = new String[0];
         private Map<URI, String> audiencesByIssuer = Map.of();
         private boolean allowAnyAudience;
+        private boolean explicitResourceBindingRequired;
         private String[] algorithms = {"RS256"};
         private Duration clockSkew = Duration.ZERO;
         private KeycardHttpTransport transport;
@@ -226,6 +238,17 @@ public final class TokenVerifier {
          */
         public Builder allowAnyAudience() {
             this.allowAnyAudience = true;
+            return this;
+        }
+
+        /**
+         * Marks a verifier created for an explicit resource binding so resource-server adapters
+         * can prevent implicit resource discovery and challenges.
+         *
+         * @return this builder
+         */
+        public Builder requireExplicitResourceBinding() {
+            this.explicitResourceBindingRequired = true;
             return this;
         }
 

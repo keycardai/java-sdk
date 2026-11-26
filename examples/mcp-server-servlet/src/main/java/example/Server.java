@@ -113,7 +113,7 @@ public final class Server implements AutoCloseable {
 
         // Bearer verification first, then the grant, then the MCP transport. Every holder in the
         // chain is async-supported because the transport answers on an async context.
-        RequireBearerAuthFilter bearer = RequireBearerAuthFilter.builder(provider.tokenVerifier())
+        RequireBearerAuthFilter bearer = RequireBearerAuthFilter.builder(provider)
                 .requiredScopes(config.requiredScopes().toArray(String[]::new))
                 .build();
         GrantFilter grant = provider.grant(config.downstreamResources().toArray(String[]::new));
