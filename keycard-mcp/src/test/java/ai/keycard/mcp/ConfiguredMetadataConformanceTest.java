@@ -7,6 +7,10 @@ import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.TransportResponse;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.util.JSONObjectUtils;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.URI;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -28,6 +32,24 @@ class ConfiguredMetadataConformanceTest {
     private static final String AS_METADATA = "/.well-known/oauth-authorization-server";
     private static final URI BASE = URI.create("https://keycard.example");
     private static final Map<String, String> ZONAL = Map.of("a", ORIGIN + "/a/mcp", "b", ORIGIN + "/b/mcp");
+
+    @Test
+    @DisplayName("a serialized servlet retains its configured zone and resource document")
+    void servletSerialization() throws Exception {
+        var servlet = ProtectedResourceMetadataServlet.builder(BASE)
+                .resourceIdentifiersByZone(ZONAL)
+                .build();
+        var bytes = new ByteArrayOutputStream();
+        try (var output = new ObjectOutputStream(bytes)) {
+            output.writeObject(servlet);
+        }
+        try (var input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()));
+                TestServer server = new TestServer()
+                        .servlet(METADATA + "/*", (ProtectedResourceMetadataServlet) input.readObject())
+                        .start()) {
+            assertDocument(server.get(METADATA + "/a/mcp"), ZONAL.get("a"), "https://a.keycard.example");
+        }
+    }
 
     @Test
     @DisplayName("rows 1, 7 and 9: each resource publishes its configured identifier not the servlet origin")

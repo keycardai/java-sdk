@@ -4,6 +4,8 @@ import ai.keycard.oauth.ConfigurationException;
 import ai.keycard.oauth.TokenVerifier;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.Serial;
+import java.io.Serializable;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -18,16 +20,34 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /** The audience and discovery policy shared by a resource server's HTTP components. */
-public final class ResourceBinding {
+public final class ResourceBinding implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private static final System.Logger LOG = System.getLogger(ResourceBinding.class.getName());
     private static final String LEGACY_WARNING =
             "Implicit resource binding is deprecated; configure resource_identifier.";
+
+    /** The exact identifier in single-resource mode. */
     private final @Nullable URI identifier;
+
+    /** The zone bindings keyed by zone ID, backed by a serializable map and entries. */
+    @SuppressWarnings("serial")
     private final Map<String, Zone> zones;
+
+    /** Whether explicit list or shared discovery mode is enabled. */
     private final boolean multiResource;
+
+    /** Whether the verifier skips audience checking. */
     private final boolean allowAnyAudience;
+
+    /** The configured global audiences in a serializable immutable list. */
+    @SuppressWarnings("serial")
     private final List<String> audiences;
+
+    /** The published protected-resource documents in a serializable immutable list. */
+    @SuppressWarnings("serial")
     private final List<Document> documents;
 
     private ResourceBinding(@Nullable URI issuer, Options options, List<String> audiences, boolean metadataOnly) {
@@ -254,7 +274,11 @@ public final class ResourceBinding {
         return resource.getRawPath().isEmpty() ? "/" : resource.getRawPath();
     }
 
-    record Document(URI resource, List<URI> issuers) {
+    record Document(URI resource, List<URI> issuers) implements Serializable {
+        Document {
+            issuers = List.copyOf(issuers);
+        }
+
         String path() {
             String suffix = resource.getRawPath();
             return BearerChallenge.PROTECTED_RESOURCE_PATH + (suffix.equals("/") ? "" : suffix);
@@ -267,7 +291,7 @@ public final class ResourceBinding {
         }
     }
 
-    private record Zone(URI identifier, @Nullable URI issuer) {}
+    private record Zone(URI identifier, @Nullable URI issuer) implements Serializable {}
 
     static final class Options {
         private @Nullable URI identifier;
