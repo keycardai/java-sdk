@@ -54,7 +54,10 @@ public final class AuthorizationCodeClient {
         return "AuthorizationCodeClient[issuer=" + issuer
                 + ", clientId=" + clientId
                 + ", credential="
-                + (credential == null ? "none" : credential.getClass().getName()) + "]";
+                + (credential != null
+                        ? credential.getClass().getName()
+                        : clientSecret != null ? "client_secret" : "none")
+                + "]";
     }
 
     /** Opens the authorize URL for the user. */

@@ -27,7 +27,6 @@ import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.RecordedRequest;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import ai.keycard.oauth.testing.TestClock;
-import com.nimbusds.jose.util.JSONObjectUtils;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
@@ -457,7 +456,7 @@ class DeviceAuthorizationConformanceTest {
     }
 
     @Test
-    @DisplayName("row 38: device code is absent from display but present in persisted JSON")
+    @DisplayName("row 38: device code is absent from display and kept on the record for persistence")
     void row38() throws Exception {
         DeviceAuthorization authorization = new DeviceAuthorization(
                 "secret-device-code",
@@ -477,16 +476,7 @@ class DeviceAuthorizationConformanceTest {
                         "interval=PT5S",
                         "expiresAt=1970-01-01T00:10:00Z")
                 .doesNotContain("secret-device-code");
-        String json = JSONObjectUtils.toJSONString(Map.of(
-                "device_code", authorization.deviceCode(),
-                "user_code", authorization.userCode(),
-                "verification_uri", authorization.verificationUri().toString(),
-                "verification_uri_complete",
-                        authorization.verificationUriComplete().toString(),
-                "expires_in", authorization.expiresIn().toSeconds(),
-                "interval", authorization.interval().toSeconds(),
-                "expires_at", authorization.expiresAt().toString()));
-        assertThat(JSONObjectUtils.parse(json)).containsEntry("device_code", "secret-device-code");
+        assertThat(authorization.deviceCode()).isEqualTo("secret-device-code");
     }
 
     @Test

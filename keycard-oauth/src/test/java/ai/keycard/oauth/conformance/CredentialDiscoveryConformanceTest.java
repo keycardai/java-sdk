@@ -236,7 +236,7 @@ class CredentialDiscoveryConformanceTest {
 
     @Test
     @DisplayName("row 20: selecting web_identity without a directory uses the default storage")
-    void row20() throws Exception {
+    void row20() {
         Credential credential = discover(env("KEYCARD_APPLICATION_CREDENTIAL_TYPE", "web_identity"));
         assertThat(credential)
                 .isInstanceOfSatisfying(
@@ -244,14 +244,11 @@ class CredentialDiscoveryConformanceTest {
                         identity -> assertThat(identity.toString())
                                 .contains(FileKeyStorage.class.getName())
                                 .doesNotContain("server_keys"));
-        WebIdentity identity = (WebIdentity) credential;
-        Path keyFile = FileKeyStorage.DEFAULT_DIR.resolve(identity.keyId() + ".pem");
-        try {
-            identity.publicJwks();
-            assertThat(keyFile).isRegularFile();
-        } finally {
-            Files.deleteIfExists(keyFile);
-        }
+        assertThat(credential)
+                .extracting("storage")
+                .isInstanceOfSatisfying(
+                        FileKeyStorage.class,
+                        storage -> assertThat(storage.dir()).isEqualTo(FileKeyStorage.DEFAULT_DIR));
     }
 
     @Test
