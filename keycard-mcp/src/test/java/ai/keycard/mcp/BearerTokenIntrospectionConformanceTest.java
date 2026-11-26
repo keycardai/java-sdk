@@ -16,6 +16,7 @@ import ai.keycard.oauth.testing.IntrospectionStub;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
@@ -143,6 +144,20 @@ class BearerTokenIntrospectionConformanceTest {
             assertThatThrownBy(() -> multiZone(a, b).credential(OWNER).build())
                     .isInstanceOf(ConfigurationException.class)
                     .hasMessageContaining("zone-keyed credential");
+        }
+    }
+
+    @Test
+    @DisplayName("a redirect-following JDK transport fails at construction")
+    void rejectsRedirectFollowingTransport() {
+        try (StubZone zone = zone()) {
+            KeycardHttpTransport redirects = KeycardHttpTransport.of(HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build());
+            assertThatThrownBy(
+                            () -> filter(zone).introspectionTransport(redirects).build())
+                    .isInstanceOf(ConfigurationException.class)
+                    .hasMessageContaining("redirects to be disabled");
         }
     }
 

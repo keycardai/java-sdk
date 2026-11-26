@@ -59,6 +59,7 @@ public final class BearerTokenIntrospection {
         if (timeout.isZero() || timeout.isNegative()) {
             throw new ConfigurationException("introspection timeout must be positive");
         }
+        transport.requireRedirectsDisabled();
         this.issuers = issuers;
         this.credential = credential;
         this.transport = transport;
