@@ -1,3 +1,18 @@
+## v0.8.0 (2026-11-26)
+
+
+- fix(oauth)!: classify workload identity source retryability (#39)
+- * fix(oauth): classify workload identity source retryability
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(oauth): preserve typed custom source retryability
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(oauth)!: require explicit custom source retryability
+- Custom token sources must use the four-argument WorkloadIdentityRuntimeException constructor with retryable set to true for failures that should be retried.
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+
 ## v0.7.1 (2026-11-26)
 
 
