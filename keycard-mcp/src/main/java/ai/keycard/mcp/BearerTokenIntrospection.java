@@ -8,6 +8,7 @@ import ai.keycard.oauth.HttpStatusException;
 import ai.keycard.oauth.KeycardHttpTransport;
 import ai.keycard.oauth.OAuthErrorCodes;
 import ai.keycard.oauth.OAuthErrorException;
+import ai.keycard.oauth.OAuthProtocolException;
 import ai.keycard.oauth.TokenIntrospectionClient;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -18,12 +19,23 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /** The per-request introspection check shared by the servlet filter and Spring starter. */
 public final class BearerTokenIntrospection {
 
     private static final System.Logger LOG = System.getLogger(BearerTokenIntrospection.class.getName());
+    private static final Pattern SAFE_RESPONSE_DETAIL = Pattern.compile(
+            "is not a JSON object|has no boolean active|has an aud that is not a string or list of strings"
+                    + "|has a (token_type|iss|sub|client_id|scope|sid|jti) that is not a string"
+                    + "|has an? (iat|exp|nbf) that is not an integer|has an out-of-range (iat|exp|nbf)");
+    private static final Pattern SAFE_METADATA_DETAIL = Pattern.compile("is not a JSON object|has no issuer"
+            + "|has an invalid (issuer|jwks_uri|(token|authorization|registration|userinfo|end_session"
+            + "|device_authorization|revocation|introspection)_endpoint)"
+            + "|has a (grant_types_supported|response_types_supported"
+            + "|(token|revocation|introspection)_endpoint_auth_methods_supported)"
+            + " that is not a list of strings");
 
     /** The outcome of checking the current status of a locally verified token. */
     public enum Result {
@@ -74,18 +86,29 @@ public final class BearerTokenIntrospection {
      * @param token the original bearer token
      * @return the status check outcome
      */
-    public Result check(String issuer, String token) {
+    public Result check(@Nullable String issuer, String token) {
+        if (issuer == null) {
+            logFailure("<unconfigured>", "the verified issuer is missing");
+            return Result.UNAVAILABLE;
+        }
+        URI zone;
         try {
-            URI zone = URI.create(issuer);
-            if (!issuers.contains(zone)) {
-                logFailure("the verified issuer is not configured for introspection");
-                return Result.UNAVAILABLE;
-            }
+            zone = URI.create(issuer);
+        } catch (IllegalArgumentException invalid) {
+            logFailure("<unconfigured>", "the verified issuer is not a URI");
+            return Result.UNAVAILABLE;
+        }
+        if (!issuers.contains(zone)) {
+            logFailure("<unconfigured>", "the verified issuer is not configured for introspection");
+            return Result.UNAVAILABLE;
+        }
+        String issuerLabel = issuerLabel(zone);
+        try {
             if (credential instanceof ClientSecret secret && secret.isMultiZone()) {
                 try {
                     secret.clientId(zone);
                 } catch (ConfigurationException missing) {
-                    logFailure("no client credential is configured for the verified issuer");
+                    logFailure(issuerLabel, "no client credential is configured for the verified issuer");
                     return Result.UNAVAILABLE;
                 }
             }
@@ -99,7 +122,7 @@ public final class BearerTokenIntrospection {
                             .build());
             return client.introspectToken(token).active() ? Result.ACTIVE : Result.INACTIVE;
         } catch (RuntimeException failure) {
-            logFailure(describe(failure));
+            logFailure(issuerLabel, describe(zone, failure));
             return Result.UNAVAILABLE;
         }
     }
@@ -114,13 +137,22 @@ public final class BearerTokenIntrospection {
         BearerChallenge.unavailable(response);
     }
 
-    private void logFailure(String cause) {
-        if (loggedFailures.add(cause)) {
-            LOG.log(System.Logger.Level.WARNING, "Bearer token introspection failed: " + cause);
+    private void logFailure(String issuer, String cause) {
+        String detail = "issuer=" + issuer + ": " + cause;
+        if (loggedFailures.add(detail)) {
+            LOG.log(System.Logger.Level.WARNING, "Bearer token introspection failed: " + detail);
         }
     }
 
-    private static String describe(RuntimeException failure) {
+    private static String issuerLabel(URI zone) {
+        String host = zone.getHost();
+        return host == null
+                ? "<invalid>"
+                : zone.getScheme() + "://" + host + (zone.getPort() == -1 ? "" : ":" + zone.getPort())
+                        + zone.getRawPath();
+    }
+
+    private static String describe(URI zone, RuntimeException failure) {
         String description = failure.getClass().getName();
         if (failure instanceof HttpStatusException http) {
             description += " HTTP " + http.status();
@@ -134,6 +166,47 @@ public final class BearerTokenIntrospection {
         if (failure.getCause() != null) {
             description += " caused by " + failure.getCause().getClass().getName();
         }
-        return description;
+        String message = safeMessage(zone, failure);
+        return message == null ? description : description + ": " + message;
+    }
+
+    private static @Nullable String safeMessage(URI zone, RuntimeException failure) {
+        String message = failure.getMessage();
+        if (message == null) {
+            return null;
+        }
+        String response = "token introspection response ";
+        String metadata = "metadata for " + zone + " ";
+        if (message.startsWith(response)
+                && SAFE_RESPONSE_DETAIL
+                        .matcher(message.substring(response.length()))
+                        .matches()) {
+            return message;
+        }
+        if (message.startsWith(metadata)
+                && SAFE_METADATA_DETAIL
+                        .matcher(message.substring(metadata.length()))
+                        .matches()) {
+            return "metadata " + message.substring(metadata.length());
+        }
+        if (message.equals("the zone " + zone + " advertises no introspection_endpoint")) {
+            return "the zone advertises no introspection_endpoint";
+        }
+        if (message.equals("introspection_endpoint must be an HTTPS URL")) {
+            return message;
+        }
+        if (failure instanceof OAuthProtocolException protocol
+                && OAuthProtocolException.ISSUER_MISMATCH.equals(protocol.code())) {
+            return "discovered issuer does not match the requested issuer";
+        }
+        if (failure instanceof HttpStatusException http) {
+            if (message.equals("discovery for " + zone + " returned HTTP " + http.status())) {
+                return "discovery request failed";
+            }
+            if (message.equals("token introspection request returned HTTP " + http.status())) {
+                return "token introspection request failed";
+            }
+        }
+        return null;
     }
 }

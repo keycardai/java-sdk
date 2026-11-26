@@ -19,8 +19,12 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -90,6 +94,55 @@ class BearerTokenIntrospectionConformanceTest {
                 }))) {
             assertUnavailable(request(server, token(zone, AUDIENCE)));
             assertThat(zone.requests(PATH)).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("introspection warnings distinguish issuers and safe causes without logging secrets")
+    void warningsNameIssuerAndSafeCause() {
+        List<String> warnings = new ArrayList<>();
+        Logger logger = Logger.getLogger(BearerTokenIntrospection.class.getName());
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                warnings.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        logger.addHandler(capture);
+        try (StubZone a = zone();
+                StubZone b = zone();
+                TestServer server = server(
+                        multiZone(a, b).credential(ClientSecret.perZone(Map.of(issuer(a), OWNER, issuer(b), OWNER))))) {
+            String tokenA = token(a, AUDIENCE);
+            String tokenB = token(b, AUDIENCE);
+            a.respond("POST", PATH, 200, "not JSON");
+            b.respond("POST", PATH, 200, "not JSON");
+            assertUnavailable(request(server, tokenA));
+            assertUnavailable(request(server, tokenA));
+            assertUnavailable(requestZoneB(server, tokenB));
+            a.respond("POST", PATH, 200, "{}");
+            assertUnavailable(request(server, tokenA));
+            a.respond(
+                    "POST",
+                    PATH,
+                    401,
+                    "{\"error\":\"invalid_client\",\"error_description\":\"private-value " + tokenA + "\"}");
+            assertUnavailable(request(server, tokenA));
+            assertThat(warnings)
+                    .hasSize(4)
+                    .anySatisfy(line -> assertThat(line).contains("issuer=" + issuer(a), "not a JSON object"))
+                    .anySatisfy(line -> assertThat(line).contains("issuer=" + issuer(b), "not a JSON object"))
+                    .anySatisfy(line -> assertThat(line).contains("issuer=" + issuer(a), "no boolean active"))
+                    .anySatisfy(line -> assertThat(line).contains("issuer=" + issuer(a), "invalid_client"))
+                    .allSatisfy(line -> assertThat(line).doesNotContain(tokenA, tokenB, "private-value"));
+        } finally {
+            logger.removeHandler(capture);
         }
     }
 
