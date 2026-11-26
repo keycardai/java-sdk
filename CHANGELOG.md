@@ -1,3 +1,9 @@
+## v0.9.0 (2026-11-26)
+
+
+- feat(oauth): add token introspection (SDK-160) (#44)
+- Adds TokenIntrospectionClient per keycard-sdk-spec token-introspection v1 (spec#100), and types introspection_endpoint and introspection_endpoint_auth_methods_supported on AuthorizationServerMetadata.
+
 ## v0.8.1 (2026-11-26)
 
 
