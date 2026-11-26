@@ -56,7 +56,7 @@ public final class DelegationClient {
 
     private DelegationClient(Builder builder) {
         KeycardHttpTransport transport = builder.transport == null ? KeycardHttpTransport.create() : builder.transport;
-        this.invocationTransport = builder.invocationTransport == null ? transport : builder.invocationTransport;
+        this.invocationTransport = transport.withoutRedirects();
         this.maxPeerResponseBytes = builder.maxPeerResponseBytes;
         this.wire = Wire.of(builder.protocolVersion);
         this.exchange = TokenExchangeClient.builder(builder.issuer)
@@ -263,7 +263,6 @@ public final class DelegationClient {
         private final URI issuer;
         private @Nullable Credential credential;
         private @Nullable KeycardHttpTransport transport;
-        private @Nullable KeycardHttpTransport invocationTransport;
         private int maxPeerResponseBytes = ServiceDiscovery.DEFAULT_MAX_PEER_RESPONSE_BYTES;
         private Duration fetchTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
         private Duration invokeTimeout = KeycardHttpTransport.DEFAULT_TIMEOUT;
@@ -288,14 +287,14 @@ public final class DelegationClient {
         }
 
         /**
-         * The transport for discovery, the exchange and the call.
+         * The transport for discovery, the exchange and the call. Redirects are disabled for
+         * invocation when the transport exposes a configurable redirect policy.
          *
          * @param transport the transport
          * @return this builder
          */
         public Builder transport(KeycardHttpTransport transport) {
             this.transport = Objects.requireNonNull(transport, "transport");
-            this.invocationTransport = null;
             return this;
         }
 
@@ -307,21 +306,7 @@ public final class DelegationClient {
          * @return this builder
          */
         public Builder httpClient(HttpClient client) {
-            transport(KeycardHttpTransport.of(client));
-            if (client.followRedirects() != HttpClient.Redirect.NEVER) {
-                HttpClient.Builder invocationClient = HttpClient.newBuilder()
-                        .followRedirects(HttpClient.Redirect.NEVER)
-                        .sslContext(client.sslContext())
-                        .sslParameters(client.sslParameters())
-                        .version(client.version());
-                client.authenticator().ifPresent(invocationClient::authenticator);
-                client.connectTimeout().ifPresent(invocationClient::connectTimeout);
-                client.cookieHandler().ifPresent(invocationClient::cookieHandler);
-                client.executor().ifPresent(invocationClient::executor);
-                client.proxy().ifPresent(invocationClient::proxy);
-                this.invocationTransport = KeycardHttpTransport.of(invocationClient.build());
-            }
-            return this;
+            return transport(KeycardHttpTransport.of(client));
         }
 
         /**

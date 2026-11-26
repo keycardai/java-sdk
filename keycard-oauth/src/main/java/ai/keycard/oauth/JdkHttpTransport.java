@@ -39,6 +39,24 @@ final class JdkHttpTransport implements KeycardHttpTransport {
     }
 
     @Override
+    public KeycardHttpTransport withoutRedirects() {
+        if (client.followRedirects() == HttpClient.Redirect.NEVER) {
+            return this;
+        }
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .sslContext(client.sslContext())
+                .sslParameters(client.sslParameters())
+                .version(client.version());
+        client.authenticator().ifPresent(builder::authenticator);
+        client.connectTimeout().ifPresent(builder::connectTimeout);
+        client.cookieHandler().ifPresent(builder::cookieHandler);
+        client.executor().ifPresent(builder::executor);
+        client.proxy().ifPresent(builder::proxy);
+        return new JdkHttpTransport(builder.build());
+    }
+
+    @Override
     public TransportResponse send(TransportRequest request) {
         return sendWithLimit(request, KeycardHttpTransport.MAX_RESPONSE_BODY_BYTES);
     }

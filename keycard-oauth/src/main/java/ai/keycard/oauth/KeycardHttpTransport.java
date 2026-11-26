@@ -59,6 +59,16 @@ public interface KeycardHttpTransport {
     }
 
     /**
+     * Returns a transport with redirects disabled when its client policy is configurable.
+     * Custom transports are responsible for their own redirect policy.
+     *
+     * @return a transport for requests that must not follow redirects
+     */
+    default KeycardHttpTransport withoutRedirects() {
+        return this;
+    }
+
+    /**
      * The default transport: a JDK {@link HttpClient} that follows no redirects and connects
      * within {@link #DEFAULT_TIMEOUT}.
      *

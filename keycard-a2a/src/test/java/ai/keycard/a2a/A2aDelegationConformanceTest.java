@@ -478,6 +478,25 @@ class A2aDelegationConformanceTest {
     }
 
     @Test
+    @DisplayName("row 16: a JDK transport wrapper does not follow an untrusted redirect")
+    void row16WrappedJdkTransport() {
+        try (StubZone zone = zone();
+                StubZone agent = agent(CARD);
+                StubZone other = StubZone.start()) {
+            redirect(agent, 307, other.url("/next").toString());
+            HttpClient httpClient = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.ALWAYS)
+                    .build();
+            DelegationClient delegation = clientBuilder(zone)
+                    .transport(KeycardHttpTransport.of(httpClient))
+                    .build();
+            assertRedirectRefused(() -> invoke(delegation, agent.issuer()), other.issuer(), agent.issuer());
+            assertThat(other.requests()).isEmpty();
+            assertInitialInvocation(zone, agent);
+        }
+    }
+
+    @Test
     @DisplayName("row 17: a relative same-origin redirect returns an invocation error")
     void row17() {
         try (StubZone zone = zone();
