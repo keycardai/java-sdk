@@ -19,7 +19,7 @@ Gradle:
 
 ```kotlin
 dependencies {
-    implementation(platform("ai.keycard:keycard-bom:0.5.1"))
+    implementation(platform("ai.keycard:keycard-bom:0.5.2"))
     implementation("ai.keycard:keycard-oauth")
 }
 ```
@@ -32,7 +32,7 @@ Maven:
     <dependency>
       <groupId>ai.keycard</groupId>
       <artifactId>keycard-bom</artifactId>
-      <version>0.5.1</version>
+      <version>0.5.2</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>

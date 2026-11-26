@@ -1,3 +1,17 @@
+## v0.5.2 (2026-11-26)
+
+
+- fix(oauth): omit secrets from printed OAuth values (#29)
+- * fix(oauth): omit secrets from printed OAuth values
+- Refs SDK-128
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * test(oauth): name the extra printed-form tests
+- * test(oauth): keep printed-form tests hermetic and name client secret auth
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+Co-authored-by: Larry Osakwe <23560354+Larry-Osakwe@users.noreply.github.com>
+
 ## v0.5.1 (2026-11-26)
 
 
