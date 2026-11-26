@@ -28,7 +28,7 @@ class ResourceBindingConformanceTest {
     private static final Map<String, String> ZONAL = Map.of("a", ORIGIN + "/a/mcp", "b", ORIGIN + "/b/mcp");
 
     @Test
-    @DisplayName("bearer rows 1, 8, 12, 12a, 12c, 15 and integration 2: exact audience and request target")
+    @DisplayName("rows 1, 8, 12, 12a, 12c, 15 and integration 2 (bearer middleware): exact audience and request target")
     void exactResource() {
         try (StubZone zone = TestServer.zone();
                 TestServer server = protect(RequireBearerAuthFilter.builder(AuthProvider.builder(zone.issuer())
@@ -48,7 +48,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 1, 12b and gate rows 2, 2a: raw query and empty configured path")
+    @DisplayName("rows 1, 12b and gate rows 2, 2a (bearer middleware): raw query and empty configured path")
     void configuredTargets() {
         try (StubZone zone = TestServer.zone();
                 TestServer root = gate(zone.issuer(), ORIGIN);
@@ -61,7 +61,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer row 12d and metadata row 10: a mounted resource uses host-root metadata")
+    @DisplayName("row 12d and metadata row 10 (bearer middleware): a mounted resource uses host-root metadata")
     void mounted() {
         AuthProvider provider = AuthProvider.builder(BASE)
                 .resourceIdentifier(ORIGIN + "/app/mcp")
@@ -84,7 +84,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 8a, 8b, 8c, 8d and 8f: list matching without discovery")
+    @DisplayName("rows 8a, 8b, 8c, 8d and 8f (bearer middleware): list matching without discovery")
     void audienceList() {
         try (StubZone zone = TestServer.zone();
                 TestServer server = protect(RequireBearerAuthFilter.builder(AuthProvider.builder(zone.issuer())
@@ -102,7 +102,8 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 8g, 8h and gate rows 6, 7: unrestricted, URN and out-of-binding scope denial")
+    @DisplayName(
+            "rows 8g, 8h and gate rows 6, 7 (bearer middleware): unrestricted, URN and out-of-binding scope denial")
     void verifyWithoutDiscovery() {
         try (StubZone zone = TestServer.zone();
                 TestServer unrestricted = protect(RequireBearerAuthFilter.builder(AuthProvider.builder(zone.issuer())
@@ -130,7 +131,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 8e, 13, 16b, 16d and 17a: mode conflicts fail at construction")
+    @DisplayName("rows 8e, 13, 16b, 16d and 17a (bearer middleware): mode conflicts fail at construction")
     void conflicts() {
         assertThatThrownBy(() -> AuthProvider.builder(BASE)
                         .multiResource(true)
@@ -204,7 +205,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 16, 16a and 16c: the request selects the zone before verification")
+    @DisplayName("rows 16, 16a and 16c (bearer middleware): the request selects the zone before verification")
     void distinctZones() {
         try (TestServer server =
                 protect(RequireBearerAuthFilter.builder(zonal().build()).zoneResolver(request -> {
@@ -223,7 +224,7 @@ class ResourceBindingConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer row 17: shared discovery precedes token-keyed verification for either zone")
+    @DisplayName("row 17 (bearer middleware): shared discovery precedes token-keyed verification for either zone")
     void sharedZones() {
         AuthProvider provider = zonal().resourceIdentifiersByZone(Map.of("a", RESOURCE, "b", RESOURCE))
                 .multiResource(true)

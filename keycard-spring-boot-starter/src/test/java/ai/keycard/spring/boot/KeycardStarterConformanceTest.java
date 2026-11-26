@@ -201,7 +201,7 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer row 7: an empty legacy audience property behaves like omission")
+    @DisplayName("row 7 (bearer middleware): an empty legacy audience property behaves like omission")
     void emptyLegacyAudience() {
         withApp(
                 DefaultChain.class,
@@ -217,7 +217,7 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer row 8e: an empty audience property cannot enable multi-resource mode")
+    @DisplayName("row 8e (bearer middleware): an empty audience property cannot enable multi-resource mode")
     void emptyMultiResourceAudience() {
         try (StubZone zone = zone()) {
             runner(zone)
@@ -231,7 +231,7 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer rows 1, 8, 12 and metadata row 7: configured resource binds Spring end to end")
+    @DisplayName("rows 1, 8, 12 and metadata row 7 (bearer middleware): configured resource binds Spring end to end")
     void explicitResource() {
         String identifier = AUDIENCE + "/me";
         String metadata = "/.well-known/oauth-protected-resource/me";
@@ -303,7 +303,7 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
-    @DisplayName("bearer row 8g: Spring unrestricted mode never advertises protected-resource discovery")
+    @DisplayName("row 8g (bearer middleware): Spring unrestricted mode never advertises protected-resource discovery")
     void explicitUnrestricted() {
         withApp(
                 DefaultChain.class,
