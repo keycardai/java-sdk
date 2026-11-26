@@ -1,5 +1,6 @@
 package ai.keycard.spring.boot;
 
+import ai.keycard.mcp.ResourceBinding;
 import ai.keycard.oauth.AccessToken;
 import ai.keycard.oauth.InvalidTokenException;
 import ai.keycard.oauth.KeycardException;
@@ -48,6 +49,10 @@ public final class KeycardJwtDecoder implements JwtDecoder {
 
     KeycardJwtDecoder forZone(URI issuer) {
         return new KeycardJwtDecoder(verifier, issuer);
+    }
+
+    void validate(ResourceBinding binding) {
+        binding.validate(verifier);
     }
 
     @Override

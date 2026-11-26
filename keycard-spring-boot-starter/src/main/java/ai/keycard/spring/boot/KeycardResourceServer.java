@@ -127,6 +127,9 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             throw new ConfigurationException(
                     "per-zone resource binding requires a request zone resolver and KeycardJwtDecoder");
         }
+        if (!binding.isLegacy() && decoder instanceof KeycardJwtDecoder keycardDecoder) {
+            keycardDecoder.validate(binding);
+        }
         if (!binding.metadataUrls().isEmpty()
                 && !contextPath.isEmpty()
                 && !contextPath.equals("/")

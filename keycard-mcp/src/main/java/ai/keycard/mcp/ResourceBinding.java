@@ -215,7 +215,13 @@ public final class ResourceBinding implements Serializable {
         return identifier == null ? audiences : List.of(identifier.toString());
     }
 
-    void validate(TokenVerifier verifier) {
+    /**
+     * Checks whether a verifier enforces the audience and issuer policy of this binding.
+     *
+     * @param verifier the verifier used by a resource-server adapter
+     * @throws ConfigurationException when the verifier is incompatible with the binding
+     */
+    public void validate(TokenVerifier verifier) {
         if (isLegacy()) {
             if (!verifier.audiencesByIssuer().isEmpty()) {
                 throw new ConfigurationException(

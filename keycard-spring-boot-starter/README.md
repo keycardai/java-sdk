@@ -61,8 +61,9 @@ For multiple zones, use the base issuer as `keycard.zone-url` and configure
 `RequireBearerAuthFilter.ZoneResolver` bean that reads no token, or use shared discovery
 with the same HTTP(S) resource for every zone, `keycard.multi-resource=true`, and the
 shared resource as the only `keycard.audiences` value. Without an explicit mode, the
-starter keeps legacy discovery and warns at construction. If you provide your own JWT
-decoder, make sure it enforces the configured audience policy; per-zone request selection
+starter keeps legacy discovery and warns at construction. The starter checks the policy
+of a custom `KeycardJwtDecoder` against an explicit binding. For other decoders, the
+application must enforce the configured audience policy; per-zone request selection
 requires the Keycard decoder.
 
 A missing or invalid token gets a 401 with an RFC 6750 challenge, a malformed header 400,

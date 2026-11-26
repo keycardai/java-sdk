@@ -9,6 +9,7 @@ import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.oauth.AccessContext;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
+import ai.keycard.oauth.TokenVerifier;
 import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
@@ -384,6 +385,37 @@ class KeycardStarterConformanceTest {
             MvcResult result = perform(mvc, "/stacked/mail", token(zone, "read", AUDIENCE));
             assertThat(body(result)).isEqualTo("[" + CALENDAR + ", " + MAIL + "]");
         });
+    }
+
+    @Test
+    @DisplayName("an inspectable JWT decoder must enforce the configured binding")
+    void decoderMustMatchExplicitBinding() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withBean(
+                            JwtDecoder.class,
+                            () -> new KeycardJwtDecoder(TokenVerifier.builder(zone.issuer())
+                                    .allowAnyAudience()
+                                    .build()))
+                    .withUserConfiguration(DefaultChain.class)
+                    .run(context -> assertThat(context)
+                            .hasFailed()
+                            .getFailure()
+                            .hasRootCauseMessage(
+                                    "the token verifier does not enforce the configured resource binding"));
+        }
+    }
+
+    @Test
+    @DisplayName("an opaque JWT decoder remains supported in single-resource mode")
+    void explicitBindingAllowsOpaqueDecoder() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withUserConfiguration(DefaultChain.class, CustomDecoder.class)
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
     }
 
     @Test
