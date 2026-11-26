@@ -10,8 +10,9 @@ implementation("ai.keycard:keycard-spring-boot-starter:0.1.0")
 ```properties
 keycard.zone-url=https://acme.keycard.cloud
 keycard.resource-identifier=https://api.example.com/mcp
-keycard.client-id=...          # for @KeycardGrant; or define a Credential bean
+keycard.client-id=...          # for @KeycardGrant and introspection; or define a Credential bean
 keycard.client-secret=...
+keycard.introspect=false
 ```
 
 With `keycard.zone-url` set and no `SecurityFilterChain` of your own, every request needs a
@@ -69,6 +70,14 @@ requires the Keycard decoder.
 A missing or invalid token gets a 401 with an RFC 6750 challenge, a malformed header 400,
 a missing scope 403, and unreachable zone keys a 503 with no challenge. Every bean backs off
 to one you define.
+
+Set `keycard.introspect=true` or opt in on your `AuthProvider` with `.introspect(true)` to
+check whether a bearer token is still active. Introspection is off when neither opts in.
+It runs after local verification and the chain's authorization checks. It uses the resource
+server's own application credential (selected by the token's verified zone for multiple
+zones), and never caches the result. An inactive token gets a 401 `invalid_token` Bearer
+challenge. An introspection failure gets a 503 `temporarily_unavailable` with no
+`WWW-Authenticate` header.
 
 [examples/mcp-server-spring-ai](../examples/mcp-server-spring-ai) runs a Spring AI MCP server
 behind it.

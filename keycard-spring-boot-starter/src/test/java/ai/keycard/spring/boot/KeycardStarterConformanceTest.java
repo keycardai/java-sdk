@@ -1,5 +1,6 @@
 package ai.keycard.spring.boot;
 
+import static ai.keycard.oauth.testing.IntrospectionStub.PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -7,10 +8,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import ai.keycard.mcp.AuthProvider;
 import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.oauth.AccessContext;
+import ai.keycard.oauth.ClientSecret;
+import ai.keycard.oauth.ConfigurationException;
+import ai.keycard.oauth.Credential;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
 import ai.keycard.oauth.TokenVerifier;
 import ai.keycard.oauth.TransportResponse;
+import ai.keycard.oauth.testing.IntrospectionStub;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import com.nimbusds.jose.jwk.JWKSet;
@@ -28,6 +33,8 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -38,6 +45,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -56,6 +64,169 @@ class KeycardStarterConformanceTest {
     private static final String AUDIENCE = "https://api.example.com";
     private static final String CALENDAR = "https://calendar.example";
     private static final String MAIL = "https://mail.example";
+
+    @Test
+    @DisplayName("row 18 (Spring): the configured owner credential checks the original token before the handler")
+    void introspectionActive() {
+        withIntrospectionApp(DefaultChain.class, "true", (zone, mvc) -> {
+            String token = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            MvcResult result = perform(mvc, "/me", token);
+            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+            assertThat(body(result)).startsWith("user-1 ").contains("SCOPE_read");
+            assertThat(zone.requests(PATH)).singleElement().satisfies(call -> {
+                assertThat(call.header("Authorization")).isEqualTo("Basic b3duZXI6c2VjcmV0");
+                assertThat(call.formParams().get("token")).containsExactly(token);
+            });
+        });
+    }
+
+    @Test
+    @DisplayName("rows 19 and 22 (Spring): the same token is checked again and can become inactive")
+    void introspectionInactive() {
+        withIntrospectionApp(DefaultChain.class, "true", (zone, mvc) -> {
+            String token = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            assertThat(perform(mvc, "/me", token).getResponse().getStatus()).isEqualTo(200);
+            zone.respond("POST", PATH, 200, "{\"active\":false}");
+            var response = perform(mvc, "/me", token).getResponse();
+            assertThat(response.getStatus()).isEqualTo(401);
+            assertThat(response.getHeader("WWW-Authenticate"))
+                    .contains(
+                            "error=\"invalid_token\"",
+                            "resource_metadata=\"https://api.example.com/.well-known/oauth-protected-resource/me\"");
+            assertThat(response.getContentAsString()).isEmpty();
+            assertThat(zone.requests(PATH)).hasSize(2);
+        });
+    }
+
+    @Test
+    @DisplayName("row 20 (Spring): an introspection failure returns 503 without a challenge")
+    void introspectionUnavailable() {
+        withIntrospectionApp(DefaultChain.class, "true", (zone, mvc) -> {
+            zone.respond("POST", PATH, 401, "{\"error\":\"invalid_client\"}");
+            var response = perform(mvc, "/me", token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me"))
+                    .getResponse();
+            assertThat(response.getStatus()).isEqualTo(503);
+            assertThat(response.getHeader("WWW-Authenticate")).isNull();
+            assertThat(response.getContentAsString()).isEqualTo("{\"error\":\"temporarily_unavailable\"}");
+            assertThat(zone.requests(PATH)).hasSize(1);
+        });
+    }
+
+    @Test
+    @DisplayName("introspection preserves the chain's custom JWT authority converter")
+    void introspectionWithCustomJwtConverter() {
+        withIntrospectionApp(CustomJwtChain.class, "true", (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            zone.respond("POST", PATH, StubResponse.json(200, "{\"active\":true}"));
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(200);
+            Map<Integer, StubResponse> rejections = Map.of(
+                    401, StubResponse.json(200, "{\"active\":false}"),
+                    503, StubResponse.json(500, "{\"error\":\"server_error\"}"));
+            for (var rejection : rejections.entrySet()) {
+                zone.respond("POST", PATH, rejection.getValue());
+                var session = new MockHttpSession();
+                var result = mvc.perform(get("/me").session(session).header("Authorization", "Bearer " + jwt))
+                        .andReturn();
+                assertThat(result.getResponse().getStatus()).isEqualTo(rejection.getKey());
+                assertThat(mvc.perform(get("/me").session(session))
+                                .andReturn()
+                                .getResponse()
+                                .getStatus())
+                        .isEqualTo(401);
+            }
+            assertThat(zone.requests(PATH)).hasSize(3);
+        });
+    }
+
+    @Test
+    @DisplayName("introspection accepts a JWT converter that retains only an application principal")
+    void introspectionWithCustomPrincipal() {
+        withIntrospectionApp(CustomPrincipalChain.class, "true", (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            var active = perform(mvc, "/me", jwt);
+            assertThat(active.getResponse().getStatus()).isEqualTo(200);
+            assertThat(body(active)).isEqualTo("user-1");
+            zone.respond("POST", PATH, 200, "{\"active\":false}");
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(401);
+            assertThat(zone.requests(PATH))
+                    .hasSize(2)
+                    .allSatisfy(
+                            call -> assertThat(call.formParams().get("token")).containsExactly(jwt));
+        });
+    }
+
+    @Test
+    @DisplayName("row 21 (Spring): invalid local tokens and default or disabled introspection make no call")
+    void introspectionSkipped() {
+        withIntrospectionApp(DefaultChain.class, "true", (zone, mvc) -> {
+            assertThat(perform(mvc, "/me", token(IntrospectionStub.issuer(zone), "read", AUDIENCE))
+                            .getResponse()
+                            .getStatus())
+                    .isEqualTo(401);
+            assertThat(zone.requests(PATH)).isEmpty();
+        });
+        MvcCheck valid = (zone, mvc) -> {
+            assertThat(perform(mvc, "/me", token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me"))
+                            .getResponse()
+                            .getStatus())
+                    .isEqualTo(200);
+            assertThat(zone.requests(PATH)).isEmpty();
+        };
+        withIntrospectionApp(DefaultChain.class, null, valid);
+        withIntrospectionApp(DefaultChain.class, "false", valid);
+    }
+
+    @Test
+    @DisplayName("Spring honors a provider's introspection opt-in without a property opt-in")
+    void introspectionInheritsProviderOptIn() {
+        MvcCheck verify = (zone, mvc) -> {
+            String jwt = token(IntrospectionStub.issuer(zone), "read", AUDIENCE + "/me");
+            zone.respond("POST", PATH, 200, "{\"active\":false}");
+            assertThat(perform(mvc, "/me", jwt).getResponse().getStatus()).isEqualTo(401);
+            assertThat(zone.requests(PATH))
+                    .singleElement()
+                    .satisfies(
+                            call -> assertThat(call.formParams().get("token")).containsExactly(jwt));
+        };
+        withIntrospectionApp(DefaultChain.class, null, true, verify);
+        withIntrospectionApp(DefaultChain.class, "false", true, verify);
+    }
+
+    @Test
+    @DisplayName("row 23 (Spring): a credential without client authentication fails at startup")
+    void introspectionCredentialsRequired() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.introspect=true")
+                    .withBean(
+                            Credential.class,
+                            () -> context -> ClientSecret.of("owner", "secret").prepareTokenExchangeRequest(context))
+                    .withUserConfiguration(DefaultChain.class)
+                    .run(context -> assertThat(context)
+                            .hasFailed()
+                            .getFailure()
+                            .hasRootCauseInstanceOf(ConfigurationException.class)
+                            .hasStackTraceContaining("introspection requires a credential with client authentication"));
+        }
+    }
+
+    @Test
+    @DisplayName("row 25 (Spring): Spring authorization checks required scope before introspection")
+    void introspectionAfterScopes() {
+        withIntrospectionApp(ScopedChain.class, "true", (zone, mvc) -> {
+            URI issuer = IntrospectionStub.issuer(zone);
+            var denied =
+                    perform(mvc, "/me", token(issuer, "read", AUDIENCE + "/me")).getResponse();
+            assertThat(denied.getStatus()).isEqualTo(403);
+            assertThat(denied.getHeader("WWW-Authenticate")).contains("error=\"insufficient_scope\"");
+            assertThat(zone.requests(PATH)).isEmpty();
+            assertThat(perform(mvc, "/me", token(issuer, "admin", AUDIENCE + "/me"))
+                            .getResponse()
+                            .getStatus())
+                    .isEqualTo(200);
+            assertThat(zone.requests(PATH)).hasSize(1);
+        });
+    }
 
     @Test
     @DisplayName("P8: a verified token reaches the handler; Spring sees Keycard's claims")
@@ -433,6 +604,41 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("a provider's introspection opt-in validates only chains that apply Keycard")
+    void unusedIntrospectionDoesNotValidateIndependentDecoder() {
+        try (StubZone zone = zone()) {
+            KeycardJwtDecoder independentDecoder = new KeycardJwtDecoder(
+                    TokenVerifier.builder(zone.issuer()).audiences(AUDIENCE).build());
+            var configured = runner(zone)
+                    .withBean(JwtDecoder.class, () -> independentDecoder::decode)
+                    .withBean(
+                            AuthProvider.class,
+                            () -> AuthProvider.builder(IntrospectionStub.issuer(zone))
+                                    .resourceIdentifier(AUDIENCE + "/me")
+                                    .credential(ClientSecret.of("owner", "secret"))
+                                    .introspect(true)
+                                    .transport(IntrospectionStub.transport(zone))
+                                    .build());
+            configured.withUserConfiguration(IndependentChain.class).run(context -> {
+                assertThat(context).hasNotFailed().hasSingleBean(KeycardResourceServer.class);
+                MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                        .apply(SecurityMockMvcConfigurers.springSecurity())
+                        .build();
+                assertThat(perform(mvc, "/me", token(zone, "read", AUDIENCE))
+                                .getResponse()
+                                .getStatus())
+                        .isEqualTo(200);
+                assertThat(zone.requests(PATH)).isEmpty();
+            });
+            configured.withUserConfiguration(DefaultChain.class).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasRootCauseMessage("introspection requires the provider's KeycardJwtDecoder");
+            });
+        }
+    }
+
+    @Test
     @DisplayName("an opaque JWT decoder remains supported in single-resource mode")
     void explicitBindingAllowsOpaqueDecoder() {
         try (StubZone zone = zone()) {
@@ -490,6 +696,54 @@ class KeycardStarterConformanceTest {
             return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_admin"))
                     .with(keycard, Customizer.withDefaults())
                     .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class CustomJwtChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain customJwt(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("custom"))
+                    .securityContext(context -> context.requireExplicitSave(false)
+                            .securityContextRepository(new HttpSessionSecurityContextRepository()))
+                    .oauth2ResourceServer(server -> server.jwt(jwt ->
+                            jwt.jwtAuthenticationConverter(decoded -> UsernamePasswordAuthenticationToken.authenticated(
+                                    decoded, null, List.of(new SimpleGrantedAuthority("custom"))))))
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class CustomPrincipalChain {
+
+        @Bean
+        SecurityFilterChain customPrincipal(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("custom"))
+                    .oauth2ResourceServer(server -> server.jwt(jwt ->
+                            jwt.jwtAuthenticationConverter(decoded -> UsernamePasswordAuthenticationToken.authenticated(
+                                    decoded.getSubject(), null, List.of(new SimpleGrantedAuthority("custom"))))))
+                    .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+
+        @Bean
+        PrincipalApi principalApi() {
+            return new PrincipalApi();
+        }
+    }
+
+    @RestController
+    static class PrincipalApi {
+
+        @GetMapping("/me")
+        String me(@AuthenticationPrincipal String principal) {
+            return principal;
         }
     }
 
@@ -641,6 +895,39 @@ class KeycardStarterConformanceTest {
                                 .build();
                         check.check(zone, mvc);
                     });
+        }
+    }
+
+    private static void withIntrospectionApp(Class<?> app, String introspect, MvcCheck check) {
+        withIntrospectionApp(app, introspect, false, check);
+    }
+
+    private static void withIntrospectionApp(
+            Class<?> app, String introspect, boolean providerIntrospects, MvcCheck check) {
+        try (StubZone zone = zone()) {
+            IntrospectionStub.discovery(zone, true);
+            zone.respond("POST", PATH, 200, "{\"active\":true}");
+            var runner = runner(zone)
+                    .withPropertyValues("keycard.zone-url=" + IntrospectionStub.issuer(zone))
+                    .withBean(
+                            AuthProvider.class,
+                            () -> AuthProvider.builder(IntrospectionStub.issuer(zone))
+                                    .resourceIdentifier(AUDIENCE + "/me")
+                                    .credential(ClientSecret.of("owner", "secret"))
+                                    .introspect(providerIntrospects)
+                                    .transport(IntrospectionStub.transport(zone))
+                                    .build())
+                    .withUserConfiguration(app);
+            if (introspect != null) {
+                runner = runner.withPropertyValues("keycard.introspect=" + introspect);
+            }
+            runner.run(context -> {
+                assertThat(context).hasNotFailed();
+                MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                        .apply(SecurityMockMvcConfigurers.springSecurity())
+                        .build();
+                check.check(zone, mvc);
+            });
         }
     }
 

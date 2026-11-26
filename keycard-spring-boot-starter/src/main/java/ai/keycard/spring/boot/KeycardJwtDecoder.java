@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -32,6 +33,7 @@ public final class KeycardJwtDecoder implements JwtDecoder {
 
     private final TokenVerifier verifier;
     private final @Nullable URI zone;
+    private final ThreadLocal<Consumer<Jwt>> verifiedJwtCapture = new ThreadLocal<>();
 
     /**
      * A decoder over the verifier.
@@ -55,6 +57,21 @@ public final class KeycardJwtDecoder implements JwtDecoder {
         binding.validate(verifier);
     }
 
+    boolean usesVerifier(TokenVerifier verifier) {
+        return this.verifier == verifier;
+    }
+
+    @Nullable
+    Consumer<Jwt> swapVerifiedJwtCapture(@Nullable Consumer<Jwt> capture) {
+        Consumer<Jwt> previous = verifiedJwtCapture.get();
+        if (capture == null) {
+            verifiedJwtCapture.remove();
+        } else {
+            verifiedJwtCapture.set(capture);
+        }
+        return previous;
+    }
+
     @Override
     public Jwt decode(String token) throws JwtException {
         AccessToken verified;
@@ -72,7 +89,12 @@ public final class KeycardJwtDecoder implements JwtDecoder {
         convertTime(claims, "exp");
         convertTime(claims, "iat");
         convertTime(claims, "nbf");
-        return new Jwt(token, (Instant) claims.get("iat"), (Instant) claims.get("exp"), header(token), claims);
+        Jwt jwt = new Jwt(token, (Instant) claims.get("iat"), (Instant) claims.get("exp"), header(token), claims);
+        Consumer<Jwt> capture = verifiedJwtCapture.get();
+        if (capture != null) {
+            capture.accept(jwt);
+        }
+        return jwt;
     }
 
     private static void convertTime(Map<String, Object> claims, String name) {
