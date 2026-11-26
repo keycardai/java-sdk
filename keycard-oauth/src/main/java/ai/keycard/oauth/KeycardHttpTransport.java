@@ -2,6 +2,7 @@ package ai.keycard.oauth;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.function.Consumer;
 
 /**
  * The HTTP transport every Keycard operation sends its requests through. Inject one to route
@@ -57,6 +58,30 @@ public interface KeycardHttpTransport {
     default TransportResponse sendWithLimit(TransportRequest request, int maxResponseBodyBytes) {
         return sendUnbounded(request);
     }
+
+    /**
+     * Sends one request, inspecting response status and headers before reading the body on the
+     * SDK's JDK transport. Other transports may provide an already buffered response.
+     *
+     * @param request the request
+     * @param maxResponseBodyBytes the positive decoded byte limit
+     * @param inspectResponse the response inspector, which may throw to reject the response
+     * @return the response, whatever its status
+     */
+    default TransportResponse sendWithLimit(
+            TransportRequest request, int maxResponseBodyBytes, Consumer<TransportResponse> inspectResponse) {
+        TransportResponse response = sendWithLimit(request, maxResponseBodyBytes);
+        inspectResponse.accept(response);
+        return response;
+    }
+
+    /**
+     * Checks that redirects are disabled when the client's policy is visible to the SDK.
+     * Custom transports are responsible for disabling redirects.
+     *
+     * @throws ConfigurationException if the client follows redirects
+     */
+    default void requireRedirectsDisabled() {}
 
     /**
      * The default transport: a JDK {@link HttpClient} that follows no redirects and connects

@@ -92,7 +92,8 @@ public final class DelegationClient {
      * @param params the {@code message/send} params in the 1.0 shape, such as {@link
      *     A2aProtocol#textMessage(String)}
      * @return the JSON-RPC result (a {@code message} or a {@code task}) and the card
-     * @throws A2aDiscoveryException when the card can't be fetched or is invalid
+     * @throws A2aDiscoveryException when the card can't be fetched or is invalid, or when an
+     *     invocation endpoint or redirect has an untrusted origin
      * @throws ai.keycard.oauth.OAuthErrorException when the zone refuses the exchange; the target
      *     isn't called
      * @throws A2aInvocationException when the call fails or the target answers with a JSON-RPC
@@ -109,7 +110,7 @@ public final class DelegationClient {
         // Resolve and vet the endpoint before exchanging, so a bad card never costs a token.
         URI url = endpoint(target, card, base);
         String token = exchange.exchangeToken(subjectToken, URI.create(base)).accessToken();
-        return new DelegationResult(wire.decodeResult(call(url, token, params)), card);
+        return new DelegationResult(wire.decodeResult(call(url, target, token, params)), card);
     }
 
     /**
@@ -160,7 +161,30 @@ public final class DelegationClient {
         return scheme + "://" + host + ":" + port;
     }
 
-    private Map<String, Object> call(URI url, String token, Map<String, Object> params) {
+    private void checkRedirect(TransportResponse response, URI url, URI target) {
+        switch (response.status()) {
+            case 301, 302, 303, 307, 308 -> {
+                String location = response.header("Location");
+                if (location == null || location.isEmpty()) {
+                    return;
+                }
+                URI redirect;
+                try {
+                    redirect = url.resolve(location);
+                } catch (IllegalArgumentException e) {
+                    return;
+                }
+                String redirectOrigin = origin(redirect);
+                if (!redirectOrigin.equals(origin(target)) && !trustedOrigins.contains(redirectOrigin)) {
+                    throw new A2aDiscoveryException(
+                            "redirect origin " + redirectOrigin + " is not trusted for target " + target, null, false);
+                }
+            }
+            default -> {}
+        }
+    }
+
+    private Map<String, Object> call(URI url, URI target, String token, Map<String, Object> params) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("jsonrpc", "2.0");
         payload.put("id", UUID.randomUUID().toString());
@@ -173,7 +197,9 @@ public final class DelegationClient {
                 .withHeader(wire.header(), wire.version());
         TransportResponse response;
         try {
-            response = transport.sendWithLimit(request, maxPeerResponseBytes);
+            response = transport.sendWithLimit(request, maxPeerResponseBytes, head -> checkRedirect(head, url, target));
+        } catch (A2aDiscoveryException e) {
+            throw e;
         } catch (ResponseBodyTooLargeException e) {
             throw e.status() >= 200 && e.status() < 300 ? e.nonRetryable() : e;
         } catch (KeycardException e) {
@@ -261,21 +287,25 @@ public final class DelegationClient {
         }
 
         /**
-         * The transport for discovery, the exchange and the call.
+         * The transport for discovery, the exchange and the call. A custom transport must not
+         * follow redirects.
          *
          * @param transport the transport
          * @return this builder
+         * @throws ai.keycard.oauth.ConfigurationException if a visible client policy follows redirects
          */
         public Builder transport(KeycardHttpTransport transport) {
-            this.transport = Objects.requireNonNull(transport, "transport");
+            Objects.requireNonNull(transport, "transport").requireRedirectsDisabled();
+            this.transport = transport;
             return this;
         }
 
         /**
-         * Sends requests through this JDK client.
+         * Sends requests through this JDK client with redirects disabled.
          *
          * @param client the client
          * @return this builder
+         * @throws ai.keycard.oauth.ConfigurationException if the client follows redirects
          */
         public Builder httpClient(HttpClient client) {
             return transport(KeycardHttpTransport.of(client));
