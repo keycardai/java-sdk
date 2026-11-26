@@ -193,6 +193,62 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("bearer rows 1, 8, 12 and metadata row 7: configured resource binds Spring end to end")
+    void explicitResource() {
+        String identifier = AUDIENCE + "/me";
+        String metadata = "/.well-known/oauth-protected-resource/me";
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    var anonymous = mvc.perform(get("/me").header("X-Forwarded-Host", "other.example"))
+                            .andReturn()
+                            .getResponse();
+                    assertThat(anonymous.getStatus()).isEqualTo(401);
+                    assertThat(anonymous.getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer resource_metadata=\"" + AUDIENCE + metadata + "\"");
+                    assertThat(perform(mvc, "/me?other=1", null).getResponse().getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer");
+                    assertThat(perform(mvc, "/me", token(zone, "read", identifier))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    var rejected =
+                            perform(mvc, "/me", token(zone, "read", AUDIENCE)).getResponse();
+                    assertThat(rejected.getStatus()).isEqualTo(401);
+                    assertThat(rejected.getHeader("WWW-Authenticate"))
+                            .contains("error=\"invalid_token\"", AUDIENCE + metadata);
+                    var document = perform(mvc, metadata, null);
+                    assertThat(document.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(body(document)).contains("\"resource\":\"" + identifier + "\"");
+                    assertThat(perform(mvc, "/.well-known/oauth-protected-resource/other", null)
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(404);
+                },
+                "keycard.resource-identifier=" + identifier);
+    }
+
+    @Test
+    @DisplayName("bearer row 8g: Spring unrestricted mode never advertises protected-resource discovery")
+    void explicitUnrestricted() {
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    assertThat(perform(mvc, "/me", token(zone, "read", "urn:example:other"))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    assertThat(perform(mvc, "/me", null).getResponse().getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer");
+                    assertThat(perform(mvc, "/.well-known/oauth-protected-resource/me", null)
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(404);
+                },
+                "keycard.allow-any-audience=true");
+    }
+
+    @Test
     @DisplayName("P7: RFC 9728 metadata with path insertion names the zone, without a token")
     void protectedResourceMetadata() throws Exception {
         withApp(DefaultChain.class, (zone, mvc) -> {
@@ -427,14 +483,21 @@ class KeycardStarterConformanceTest {
     }
 
     private static void withApp(Class<?> app, MvcCheck check) {
+        withApp(app, check, "keycard.audiences=" + AUDIENCE);
+    }
+
+    private static void withApp(Class<?> app, MvcCheck check, String... properties) {
         try (StubZone zone = zone()) {
-            runner(zone).withUserConfiguration(app).run(context -> {
-                assertThat(context).hasNotFailed();
-                MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
-                        .apply(SecurityMockMvcConfigurers.springSecurity())
-                        .build();
-                check.check(zone, mvc);
-            });
+            runner(zone)
+                    .withPropertyValues(properties)
+                    .withUserConfiguration(app)
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                                .apply(SecurityMockMvcConfigurers.springSecurity())
+                                .build();
+                        check.check(zone, mvc);
+                    });
         }
     }
 
@@ -443,7 +506,6 @@ class KeycardStarterConformanceTest {
                 .withConfiguration(AutoConfigurations.of(KeycardAutoConfiguration.class))
                 .withPropertyValues(
                         "keycard.zone-url=" + zone.issuer(),
-                        "keycard.audiences=" + AUDIENCE,
                         "keycard.client-id=cid",
                         "keycard.client-secret=csecret",
                         "keycard.resource-name=Test API",

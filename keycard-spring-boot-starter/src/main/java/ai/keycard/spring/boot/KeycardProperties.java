@@ -2,8 +2,10 @@ package ai.keycard.spring.boot;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * {@code keycard.*} configuration. Spring's relaxed binding lets {@code KEYCARD_ZONE_URL} set
@@ -12,7 +14,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <pre>
  * keycard.zone-url=https://acme.keycard.cloud
- * keycard.audiences=https://mcp.example.com/mcp
+ * keycard.resource-identifier=https://mcp.example.com/mcp
  * keycard.client-id=...        # only for @KeycardGrant, unless a Credential bean is defined
  * keycard.client-secret=...
  * </pre>
@@ -23,6 +25,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param clientSecret the application's client secret
  * @param resourceName the human-readable name published in protected-resource metadata
  * @param scopesSupported the scopes published in protected-resource metadata
+ * @param resourceIdentifier the exact HTTP(S) resource URL or URN
+ * @param resourceIdentifiersByZone the resource identifiers by zone ID
+ * @param multiResource enables explicit audience list or shared discovery mode
+ * @param allowAnyAudience skips audience checking without enabling protected-resource discovery
+ * @param metadataForwarded the public host-root metadata URL is forwarded into the servlet context
  */
 @ConfigurationProperties("keycard")
 public record KeycardProperties(
@@ -31,7 +38,61 @@ public record KeycardProperties(
         @Nullable String clientId,
         @Nullable String clientSecret,
         @Nullable String resourceName,
-        @Nullable List<String> scopesSupported) {
+        @Nullable List<String> scopesSupported,
+        @Nullable String resourceIdentifier,
+        @Nullable Map<String, String> resourceIdentifiersByZone,
+        boolean multiResource,
+        boolean allowAnyAudience,
+        boolean metadataForwarded) {
+
+    /**
+     * Creates the Spring resource server configuration.
+     *
+     * @param zoneUrl the configured zone or base issuer
+     * @param audiences the optional audience list
+     * @param clientId the optional client ID
+     * @param clientSecret the optional client secret
+     * @param resourceName the optional resource name
+     * @param scopesSupported the optional resource scopes
+     * @param resourceIdentifier the optional exact resource identifier
+     * @param resourceIdentifiersByZone the optional zone resource identifiers
+     * @param multiResource whether to enable list-based verification
+     * @param allowAnyAudience whether to skip audience checking
+     * @param metadataForwarded whether metadata requests are forwarded into the context
+     */
+    @ConstructorBinding
+    public KeycardProperties {}
+
+    /**
+     * Creates an implicit resource binding configuration.
+     *
+     * @param zoneUrl the configured zone issuer
+     * @param audiences the optional audience list
+     * @param clientId the optional client ID
+     * @param clientSecret the optional client secret
+     * @param resourceName the optional resource name
+     * @param scopesSupported the optional resource scopes
+     */
+    public KeycardProperties(
+            @Nullable URI zoneUrl,
+            @Nullable List<String> audiences,
+            @Nullable String clientId,
+            @Nullable String clientSecret,
+            @Nullable String resourceName,
+            @Nullable List<String> scopesSupported) {
+        this(
+                zoneUrl,
+                audiences,
+                clientId,
+                clientSecret,
+                resourceName,
+                scopesSupported,
+                null,
+                null,
+                false,
+                false,
+                false);
+    }
 
     /**
      * Names the zone and client, never the secret.

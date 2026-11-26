@@ -1,11 +1,13 @@
 package ai.keycard.spring.boot;
 
 import ai.keycard.mcp.AuthProvider;
+import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.oauth.ClientSecret;
 import ai.keycard.oauth.Credential;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -63,9 +65,16 @@ public class KeycardAutoConfiguration {
     @ConditionalOnMissingBean
     public AuthProvider keycardAuthProvider(KeycardProperties properties, ObjectProvider<Credential> credential) {
         AuthProvider.Builder builder = AuthProvider.builder(Objects.requireNonNull(properties.zoneUrl()));
-        if (properties.audiences() != null && !properties.audiences().isEmpty()) {
+        if (properties.audiences() != null) {
             builder.audiences(properties.audiences().toArray(String[]::new));
         }
+        if (properties.resourceIdentifier() != null) {
+            builder.resourceIdentifier(properties.resourceIdentifier());
+        }
+        if (properties.resourceIdentifiersByZone() != null) {
+            builder.resourceIdentifiersByZone(properties.resourceIdentifiersByZone());
+        }
+        builder.multiResource(properties.multiResource()).allowAnyAudience(properties.allowAnyAudience());
         Credential configured = credential.getIfAvailable();
         if (configured != null) {
             builder.credential(configured);
@@ -92,16 +101,28 @@ public class KeycardAutoConfiguration {
      *
      * @param properties the {@code keycard.*} settings
      * @param decoder the decoder
+     * @param provider the resource server configuration
+     * @param zoneResolver the optional request-based zone selector
+     * @param contextPath the configured servlet context path
      * @return the configurer
      */
     @Bean
     @ConditionalOnMissingBean
-    public KeycardResourceServer keycardResourceServer(KeycardProperties properties, JwtDecoder decoder) {
+    public KeycardResourceServer keycardResourceServer(
+            KeycardProperties properties,
+            JwtDecoder decoder,
+            AuthProvider provider,
+            ObjectProvider<ZoneResolver> zoneResolver,
+            @Value("${server.servlet.context-path:}") String contextPath) {
         return new KeycardResourceServer(
                 String.valueOf(properties.zoneUrl()),
                 decoder,
                 properties.resourceName() == null ? "" : properties.resourceName(),
-                properties.scopesSupported() == null ? List.of() : properties.scopesSupported());
+                properties.scopesSupported() == null ? List.of() : properties.scopesSupported(),
+                provider,
+                provider.resourceBinding().requiresZone() ? zoneResolver.getIfAvailable() : null,
+                contextPath,
+                properties.metadataForwarded());
     }
 
     /**
@@ -130,9 +151,14 @@ public class KeycardAutoConfiguration {
     static class Mvc {
 
         @Bean
-        WebMvcConfigurer keycardWebMvcConfigurer(AuthProvider provider) {
-            KeycardGrantInterceptor interceptor =
-                    new KeycardGrantInterceptor(provider, new BearerTokenAuthenticationEntryPoint());
+        WebMvcConfigurer keycardWebMvcConfigurer(AuthProvider provider, ObjectProvider<ZoneResolver> zoneResolver) {
+            KeycardGrantInterceptor interceptor = new KeycardGrantInterceptor(
+                    provider,
+                    provider.resourceBinding().isLegacy()
+                            ? new BearerTokenAuthenticationEntryPoint()
+                            : KeycardResourceServer.challenge(
+                                    provider.resourceBinding(),
+                                    provider.resourceBinding().requiresZone() ? zoneResolver.getIfAvailable() : null));
             return new WebMvcConfigurer() {
                 @Override
                 public void addInterceptors(InterceptorRegistry registry) {

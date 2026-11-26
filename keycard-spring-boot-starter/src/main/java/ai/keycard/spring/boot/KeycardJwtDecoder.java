@@ -5,12 +5,14 @@ import ai.keycard.oauth.InvalidTokenException;
 import ai.keycard.oauth.KeycardException;
 import ai.keycard.oauth.TokenVerifier;
 import com.nimbusds.jose.util.JSONObjectUtils;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -28,6 +30,7 @@ import org.springframework.security.oauth2.jwt.JwtException;
 public final class KeycardJwtDecoder implements JwtDecoder {
 
     private final TokenVerifier verifier;
+    private final @Nullable URI zone;
 
     /**
      * A decoder over the verifier.
@@ -35,14 +38,23 @@ public final class KeycardJwtDecoder implements JwtDecoder {
      * @param verifier the verifier
      */
     public KeycardJwtDecoder(TokenVerifier verifier) {
+        this(verifier, null);
+    }
+
+    private KeycardJwtDecoder(TokenVerifier verifier, @Nullable URI zone) {
         this.verifier = Objects.requireNonNull(verifier, "verifier");
+        this.zone = zone;
+    }
+
+    KeycardJwtDecoder forZone(URI issuer) {
+        return new KeycardJwtDecoder(verifier, issuer);
     }
 
     @Override
     public Jwt decode(String token) throws JwtException {
         AccessToken verified;
         try {
-            verified = verifier.verifyToken(token);
+            verified = zone == null ? verifier.verifyToken(token) : verifier.verifyTokenForZone(token, zone);
         } catch (InvalidTokenException e) {
             // Spring puts this message in the challenge's error_description, so keep it fixed: the
             // verifier's own message names the expected issuer and audiences. The cause keeps it
