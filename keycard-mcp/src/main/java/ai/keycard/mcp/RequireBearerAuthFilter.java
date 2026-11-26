@@ -51,6 +51,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>On success the {@link AccessToken} is stored under {@link
  * KeycardRequest#ACCESS_TOKEN_ATTRIBUTE} and the chain continues.
+ *
+ * <p>{@link Builder#introspect(boolean)} enables an uncached status check after local
+ * verification and scope enforcement, using the resource server's application credential.
+ * The filter inherits the provider setting by default; standalone filters default to off.
+ * An inactive token gets a 401 {@code invalid_token} Bearer challenge. An introspection failure
+ * gets a 503 {@code temporarily_unavailable} with no {@code WWW-Authenticate} header.
  */
 public final class RequireBearerAuthFilter implements Filter {
 

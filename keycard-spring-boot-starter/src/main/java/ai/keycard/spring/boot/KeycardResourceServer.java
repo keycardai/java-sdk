@@ -75,6 +75,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <p>Scope checks are Spring's: a token's {@code scope} claim becomes {@code SCOPE_*} authorities,
  * and a denied rule answers 403 {@code insufficient_scope}. The starter registers one of these as
  * a bean and applies it to a default chain when the application defines none.
+ *
+ * <p>Set {@code keycard.introspect=true} or enable introspection on the {@link AuthProvider}
+ * to check each locally verified and authorized bearer token with the resource server's
+ * application credential. Introspection is off by default and does not cache results. An
+ * inactive token gets a 401 {@code invalid_token} Bearer challenge. An introspection failure
+ * gets a 503 {@code temporarily_unavailable} with no {@code WWW-Authenticate} header.
  */
 public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardResourceServer, HttpSecurity> {
 
