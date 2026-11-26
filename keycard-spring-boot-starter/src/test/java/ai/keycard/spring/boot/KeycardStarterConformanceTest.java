@@ -408,6 +408,31 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("an unused Keycard binding does not validate an independent security chain's decoder")
+    void unusedBindingDoesNotValidateDecoder() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withBean(
+                            JwtDecoder.class,
+                            () -> new KeycardJwtDecoder(TokenVerifier.builder(zone.issuer())
+                                    .audiences(AUDIENCE)
+                                    .build()))
+                    .withUserConfiguration(IndependentChain.class)
+                    .run(context -> {
+                        assertThat(context).hasNotFailed().hasSingleBean(KeycardResourceServer.class);
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                                .apply(SecurityMockMvcConfigurers.springSecurity())
+                                .build();
+                        assertThat(perform(mvc, "/me", token(zone, "read", AUDIENCE))
+                                        .getResponse()
+                                        .getStatus())
+                                .isEqualTo(200);
+                    });
+        }
+    }
+
+    @Test
     @DisplayName("an opaque JWT decoder remains supported in single-resource mode")
     void explicitBindingAllowsOpaqueDecoder() {
         try (StubZone zone = zone()) {
@@ -464,6 +489,19 @@ class KeycardStarterConformanceTest {
         SecurityFilterChain scoped(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
             return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_admin"))
                     .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class IndependentChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain independent(HttpSecurity http, JwtDecoder decoder) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                    .oauth2ResourceServer(server -> server.jwt(jwt -> jwt.decoder(decoder)))
                     .build();
         }
     }

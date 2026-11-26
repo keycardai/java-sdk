@@ -127,9 +127,6 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
             throw new ConfigurationException(
                     "per-zone resource binding requires a request zone resolver and KeycardJwtDecoder");
         }
-        if (!binding.isLegacy() && decoder instanceof KeycardJwtDecoder keycardDecoder) {
-            keycardDecoder.validate(binding);
-        }
         if (!binding.metadataUrls().isEmpty()
                 && !contextPath.isEmpty()
                 && !contextPath.equals("/")
@@ -150,6 +147,9 @@ public final class KeycardResourceServer extends AbstractHttpConfigurer<KeycardR
 
     @Override
     public void init(HttpSecurity http) {
+        if (binding != null && !binding.isLegacy() && decoder instanceof KeycardJwtDecoder keycardDecoder) {
+            keycardDecoder.validate(binding);
+        }
         AuthenticationEntryPoint challenge = challenge(binding, zoneResolver);
         BearerTokenAccessDeniedHandler denied = new BearerTokenAccessDeniedHandler();
         http.oauth2ResourceServer(resourceServer -> {
