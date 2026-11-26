@@ -16,18 +16,19 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 final class AuthorizationServerMetadataFilter extends OncePerRequestFilter {
 
-    static final String PATH = "/.well-known/oauth-authorization-server";
-
     private final AuthorizationServerMetadataServlet servlet;
+    private final boolean explicitBinding;
+    private static final String PATH = "/.well-known/oauth-authorization-server";
 
-    AuthorizationServerMetadataFilter(AuthorizationServerMetadataServlet servlet) {
+    AuthorizationServerMetadataFilter(AuthorizationServerMetadataServlet servlet, boolean explicitBinding) {
         this.servlet = Objects.requireNonNull(servlet, "servlet");
+        this.explicitBinding = explicitBinding;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        return !PATH.equals(path);
+        return !path.equals(PATH) && !(explicitBinding && path.startsWith(PATH + "/"));
     }
 
     @Override

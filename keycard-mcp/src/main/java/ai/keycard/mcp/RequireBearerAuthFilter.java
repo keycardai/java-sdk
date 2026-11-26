@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -67,15 +68,20 @@ public final class RequireBearerAuthFilter implements Filter {
     private final TokenVerifier verifier;
     private final Set<String> requiredScopes;
     private final @Nullable ZoneResolver zoneResolver;
+    private final ResourceBinding binding;
+    private final boolean authenticationRequired;
 
-    private RequireBearerAuthFilter(Builder builder) {
+    private RequireBearerAuthFilter(Builder builder, ResourceBinding binding) {
         this.verifier = builder.verifier;
         this.requiredScopes = Set.copyOf(builder.requiredScopes);
         this.zoneResolver = builder.zoneResolver;
+        this.binding = binding;
+        this.authenticationRequired = builder.authenticationRequired;
     }
 
     /**
-     * A builder for a filter verifying with {@code verifier}.
+     * A builder for a filter verifying with a standalone {@code verifier}.
+     * For a provider's verifier, prefer {@link #builder(AuthProvider)}.
      *
      * @param verifier the token verifier, built with this server's audience
      * @return a new builder
@@ -84,25 +90,51 @@ public final class RequireBearerAuthFilter implements Filter {
         return new Builder(verifier);
     }
 
+    /**
+     * A builder sharing the provider's audience and discovery configuration.
+     *
+     * @param provider the resource server's provider
+     * @return a new builder
+     */
+    public static Builder builder(AuthProvider provider) {
+        Builder builder = new Builder(provider.tokenVerifier());
+        builder.sharedBinding = provider.resourceBinding();
+        return builder;
+    }
+
     @Override
     public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
             throws IOException, ServletException {
         HttpServletRequest request = (HttpServletRequest) req;
         HttpServletResponse response = (HttpServletResponse) res;
+        URI zone = binding.requiresZone() && zoneResolver != null ? zoneResolver.resolve(request) : null;
+        request.setAttribute(BearerChallenge.BINDING_ATTRIBUTE, binding);
+        request.setAttribute(BearerChallenge.ZONE_ATTRIBUTE, zone);
+        if (binding.requiresZone() && (zone == null || !verifier.issuers().contains(zone))) {
+            BearerChallenge.challenge(request, response, 401, "invalid_token", "the request's zone is not configured");
+            return;
+        }
 
         // A forward or include of a request this filter already verified: the token stands, and
         // only this instance's scopes are left to check. Request attributes are server-side, so a
         // client can't set this one.
         AccessToken verified = KeycardRequest.accessToken(request).orElse(null);
-        if (verified != null) {
+        if (verified != null && binding.isLegacy()) {
             if (hasRequiredScopes(request, response, verified)) {
                 chain.doFilter(request, response);
             }
             return;
         }
+        if (!binding.isLegacy()) {
+            request.removeAttribute(KeycardRequest.ACCESS_TOKEN_ATTRIBUTE);
+        }
 
         String header = request.getHeader("Authorization");
         if (header == null || header.isBlank()) {
+            if (!authenticationRequired) {
+                chain.doFilter(request, response);
+                return;
+            }
             BearerChallenge.challenge(request, response, 401, null, null);
             return;
         }
@@ -118,7 +150,8 @@ public final class RequireBearerAuthFilter implements Filter {
 
         AccessToken token;
         try {
-            token = verify(request, parts[1]);
+            token = verify(
+                    zoneResolver != null && !binding.requiresZone() ? zoneResolver.resolve(request) : zone, parts[1]);
         } catch (InvalidTokenException e) {
             // A fixed description: the verifier's message names the expected issuer and audiences,
             // which a caller probing with forged tokens has no business learning.
@@ -155,11 +188,10 @@ public final class RequireBearerAuthFilter implements Filter {
         return true;
     }
 
-    private AccessToken verify(HttpServletRequest request, String token) {
+    private AccessToken verify(@Nullable URI zone, String token) {
         if (zoneResolver == null) {
             return verifier.verifyToken(token);
         }
-        URI zone = zoneResolver.resolve(request);
         if (zone == null) {
             throw new InvalidTokenException("the request's zone could not be determined");
         }
@@ -170,8 +202,12 @@ public final class RequireBearerAuthFilter implements Filter {
     public static final class Builder {
 
         private final TokenVerifier verifier;
+        private final ResourceBinding.Options options = new ResourceBinding.Options();
+        private @Nullable ResourceBinding sharedBinding;
+        private @Nullable URI baseIssuer;
         private Set<String> requiredScopes = Set.of();
         private @Nullable ZoneResolver zoneResolver;
+        private boolean authenticationRequired = true;
 
         private Builder(TokenVerifier verifier) {
             this.verifier = Objects.requireNonNull(verifier, "verifier");
@@ -189,10 +225,77 @@ public final class RequireBearerAuthFilter implements Filter {
         }
 
         /**
+         * Allows anonymous requests to reach downstream gates while verifying any presented token.
+         *
+         * @param required whether every request needs a bearer token
+         * @return this builder
+         */
+        public Builder authenticationRequired(boolean required) {
+            this.authenticationRequired = required;
+            return this;
+        }
+
+        /**
+         * Requires the supplied verifier to enforce one exact resource identifier.
+         *
+         * @param identifier the HTTP(S) URL or URN
+         * @return this builder
+         */
+        public Builder resourceIdentifier(String identifier) {
+            requireStandalone();
+            options.identifier(identifier);
+            return this;
+        }
+
+        /**
+         * Sets zone-specific bindings for a verifier configured with matching issuer audiences.
+         *
+         * @param issuer the base issuer
+         * @param identifiers the resource identifier for each zone ID
+         * @return this builder
+         */
+        public Builder resourceIdentifiersByZone(URI issuer, Map<String, String> identifiers) {
+            requireStandalone();
+            options.identifiersByZone(identifiers);
+            this.baseIssuer = issuer;
+            return this;
+        }
+
+        /**
+         * Enables explicit list-based verification or shared discovery with a zone map.
+         *
+         * @param enabled whether to use the configured verifier's audience list
+         * @return this builder
+         */
+        public Builder multiResource(boolean enabled) {
+            requireStandalone();
+            options.multiResource(enabled);
+            return this;
+        }
+
+        /**
+         * Uses a verifier configured to accept any audience and disables discovery.
+         *
+         * @param enabled whether to skip the audience check
+         * @return this builder
+         */
+        public Builder allowAnyAudience(boolean enabled) {
+            requireStandalone();
+            options.allowAnyAudience(enabled);
+            return this;
+        }
+
+        private void requireStandalone() {
+            if (sharedBinding != null) {
+                throw new ConfigurationException("configure resource binding on the provider");
+            }
+        }
+
+        /**
          * Pins each request to one zone for a multi-zone server; a request whose zone can't be
          * determined, or isn't trusted by the verifier, is rejected.
          *
-         * @param zoneResolver resolves the zone issuer from the request
+         * @param zoneResolver resolves the zone issuer without consulting the bearer token
          * @return this builder
          */
         public Builder zoneResolver(ZoneResolver zoneResolver) {
@@ -206,15 +309,29 @@ public final class RequireBearerAuthFilter implements Filter {
          * @return the filter
          * @throws ConfigurationException when the verifier trusts more than one zone and no zone
          *     resolver is set: each request must be verified against its own zone, never any
-         *     trusted one
+         *     trusted one, or when the resource binding is incompatible with the verifier
          */
         public RequireBearerAuthFilter build() {
-            if (zoneResolver == null && verifier.issuers().size() > 1) {
+            ResourceBinding binding = sharedBinding != null
+                    ? sharedBinding
+                    : ResourceBinding.forPrebuiltVerifier(
+                            baseIssuer == null ? verifier.issuers().get(0) : baseIssuer, options, verifier);
+            binding.validate(verifier);
+            if (zoneResolver == null
+                    && (binding.requiresZone() || (verifier.issuers().size() > 1 && !binding.sharedDiscovery()))) {
                 throw new ConfigurationException(
                         "the verifier trusts " + verifier.issuers().size()
                                 + " zones; set a zoneResolver so each request is verified against its own zone");
             }
-            return new RequireBearerAuthFilter(this);
+            if (binding.sharedDiscovery() && zoneResolver != null) {
+                throw new ConfigurationException("shared discovery selects the zone from the token");
+            }
+            if (sharedBinding == null
+                    && binding.isLegacy()
+                    && !verifier.audiences().isEmpty()) {
+                ResourceBinding.warnLegacy();
+            }
+            return new RequireBearerAuthFilter(this, binding);
         }
     }
 }

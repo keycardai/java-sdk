@@ -4,14 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import ai.keycard.mcp.AuthProvider;
+import ai.keycard.mcp.RequireBearerAuthFilter.ZoneResolver;
 import ai.keycard.oauth.AccessContext;
 import ai.keycard.oauth.JwtSigner;
 import ai.keycard.oauth.SigningKey;
+import ai.keycard.oauth.TokenVerifier;
+import ai.keycard.oauth.TransportResponse;
 import ai.keycard.oauth.testing.StubZone;
 import ai.keycard.oauth.testing.StubZone.StubResponse;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import com.nimbusds.jose.util.JSONObjectUtils;
+import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,8 +32,10 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.web.servlet.MockMvc;
@@ -193,6 +201,128 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("row 7 (bearer middleware): an empty legacy audience property behaves like omission")
+    void emptyLegacyAudience() {
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    assertThat(perform(mvc, "/me", token(zone, "read", "urn:example:other"))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    assertThat(perform(mvc, "/me", null).getResponse().getHeader("WWW-Authenticate"))
+                            .contains("resource_metadata=");
+                },
+                "keycard.audiences=");
+    }
+
+    @Test
+    @DisplayName("row 8e (bearer middleware): an empty audience property cannot enable multi-resource mode")
+    void emptyMultiResourceAudience() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.audiences=", "keycard.multi-resource=true")
+                    .withUserConfiguration(DefaultChain.class)
+                    .run(context -> assertThat(context)
+                            .hasFailed()
+                            .getFailure()
+                            .hasRootCauseMessage("multiResource requires a nonempty audience list"));
+        }
+    }
+
+    @Test
+    @DisplayName("rows 1, 8, 12 and metadata row 7 (bearer middleware): configured resource binds Spring end to end")
+    void explicitResource() {
+        String identifier = AUDIENCE + "/me";
+        String metadata = "/.well-known/oauth-protected-resource/me";
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    var anonymous = mvc.perform(get("/me").header("X-Forwarded-Host", "other.example"))
+                            .andReturn()
+                            .getResponse();
+                    assertThat(anonymous.getStatus()).isEqualTo(401);
+                    assertThat(anonymous.getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer resource_metadata=\"" + AUDIENCE + metadata + "\"");
+                    assertThat(perform(mvc, "/me?other=1", null).getResponse().getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer");
+                    assertThat(perform(mvc, "/me", token(zone, "read", identifier))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    var rejected =
+                            perform(mvc, "/me", token(zone, "read", AUDIENCE)).getResponse();
+                    assertThat(rejected.getStatus()).isEqualTo(401);
+                    assertThat(rejected.getHeader("WWW-Authenticate"))
+                            .contains("error=\"invalid_token\"", AUDIENCE + metadata);
+                    var document = perform(mvc, metadata, null);
+                    assertThat(document.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(body(document)).contains("\"resource\":\"" + identifier + "\"");
+                    assertThat(perform(mvc, "/.well-known/oauth-protected-resource/other", null)
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(404);
+                },
+                "keycard.resource-identifier=" + identifier);
+    }
+
+    @Test
+    @DisplayName("per-zone verification applies the application's JWT authority converter")
+    void perZoneAuthorityConverter() {
+        URI base = URI.create("https://keycard.example");
+        URI issuer = URI.create("https://a.keycard.example");
+        String resource = AUDIENCE + "/me";
+        AuthProvider provider = AuthProvider.builder(base)
+                .resourceIdentifiersByZone(Map.of("a", resource))
+                .transport(request -> {
+                    String body = request.uri().getPath().equals(StubZone.JWKS_PATH)
+                            ? new JWKSet(KEY.toPublicJWK()).toString()
+                            : JSONObjectUtils.toJSONString(
+                                    Map.of("issuer", issuer.toString(), "jwks_uri", issuer + StubZone.JWKS_PATH));
+                    return new TransportResponse(200, Map.of(), body);
+                })
+                .build();
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> List.of(new SimpleGrantedAuthority("SCOPE_admin")));
+        new WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(KeycardAutoConfiguration.class))
+                .withPropertyValues("keycard.zone-url=" + base)
+                .withBean(AuthProvider.class, () -> provider)
+                .withBean(ZoneResolver.class, () -> request -> issuer)
+                .withBean(JwtAuthenticationConverter.class, () -> converter)
+                .withUserConfiguration(ScopedChain.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                            .apply(SecurityMockMvcConfigurers.springSecurity())
+                            .build();
+                    MvcResult result = perform(mvc, "/me", token(issuer, "read", resource));
+                    assertThat(result.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(body(result)).contains("SCOPE_admin").doesNotContain("SCOPE_read");
+                });
+    }
+
+    @Test
+    @DisplayName("row 8g (bearer middleware): Spring unrestricted mode never advertises protected-resource discovery")
+    void explicitUnrestricted() {
+        withApp(
+                DefaultChain.class,
+                (zone, mvc) -> {
+                    assertThat(perform(mvc, "/me", token(zone, "read", "urn:example:other"))
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(200);
+                    assertThat(perform(mvc, "/me", null).getResponse().getHeader("WWW-Authenticate"))
+                            .isEqualTo("Bearer");
+                    assertThat(perform(mvc, "/.well-known/oauth-protected-resource/me", null)
+                                    .getResponse()
+                                    .getStatus())
+                            .isEqualTo(404);
+                },
+                "keycard.allow-any-audience=true");
+    }
+
+    @Test
     @DisplayName("P7: RFC 9728 metadata with path insertion names the zone, without a token")
     void protectedResourceMetadata() throws Exception {
         withApp(DefaultChain.class, (zone, mvc) -> {
@@ -258,6 +388,62 @@ class KeycardStarterConformanceTest {
     }
 
     @Test
+    @DisplayName("an inspectable JWT decoder must enforce the configured binding")
+    void decoderMustMatchExplicitBinding() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withBean(
+                            JwtDecoder.class,
+                            () -> new KeycardJwtDecoder(TokenVerifier.builder(zone.issuer())
+                                    .allowAnyAudience()
+                                    .build()))
+                    .withUserConfiguration(DefaultChain.class)
+                    .run(context -> assertThat(context)
+                            .hasFailed()
+                            .getFailure()
+                            .hasRootCauseMessage(
+                                    "the token verifier does not enforce the configured resource binding"));
+        }
+    }
+
+    @Test
+    @DisplayName("an unused Keycard binding does not validate an independent security chain's decoder")
+    void unusedBindingDoesNotValidateDecoder() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withBean(
+                            JwtDecoder.class,
+                            () -> new KeycardJwtDecoder(TokenVerifier.builder(zone.issuer())
+                                    .audiences(AUDIENCE)
+                                    .build()))
+                    .withUserConfiguration(IndependentChain.class)
+                    .run(context -> {
+                        assertThat(context).hasNotFailed().hasSingleBean(KeycardResourceServer.class);
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                                .apply(SecurityMockMvcConfigurers.springSecurity())
+                                .build();
+                        assertThat(perform(mvc, "/me", token(zone, "read", AUDIENCE))
+                                        .getResponse()
+                                        .getStatus())
+                                .isEqualTo(200);
+                    });
+        }
+    }
+
+    @Test
+    @DisplayName("an opaque JWT decoder remains supported in single-resource mode")
+    void explicitBindingAllowsOpaqueDecoder() {
+        try (StubZone zone = zone()) {
+            runner(zone)
+                    .withPropertyValues("keycard.resource-identifier=" + AUDIENCE + "/me")
+                    .withUserConfiguration(DefaultChain.class, CustomDecoder.class)
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
+    }
+
+    @Test
     @DisplayName("an application JwtDecoder or SecurityFilterChain replaces the starter's")
     void backsOff() {
         try (StubZone zone = zone()) {
@@ -303,6 +489,19 @@ class KeycardStarterConformanceTest {
         SecurityFilterChain scoped(HttpSecurity http, KeycardResourceServer keycard) throws Exception {
             return http.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_admin"))
                     .with(keycard, Customizer.withDefaults())
+                    .build();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @EnableWebSecurity
+    static class IndependentChain extends DefaultChain {
+
+        @Bean
+        SecurityFilterChain independent(HttpSecurity http, JwtDecoder decoder) throws Exception {
+            return http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                    .oauth2ResourceServer(server -> server.jwt(jwt -> jwt.decoder(decoder)))
                     .build();
         }
     }
@@ -427,14 +626,21 @@ class KeycardStarterConformanceTest {
     }
 
     private static void withApp(Class<?> app, MvcCheck check) {
+        withApp(app, check, "keycard.audiences=" + AUDIENCE);
+    }
+
+    private static void withApp(Class<?> app, MvcCheck check, String... properties) {
         try (StubZone zone = zone()) {
-            runner(zone).withUserConfiguration(app).run(context -> {
-                assertThat(context).hasNotFailed();
-                MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
-                        .apply(SecurityMockMvcConfigurers.springSecurity())
-                        .build();
-                check.check(zone, mvc);
-            });
+            runner(zone)
+                    .withPropertyValues(properties)
+                    .withUserConfiguration(app)
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context)
+                                .apply(SecurityMockMvcConfigurers.springSecurity())
+                                .build();
+                        check.check(zone, mvc);
+                    });
         }
     }
 
@@ -443,7 +649,6 @@ class KeycardStarterConformanceTest {
                 .withConfiguration(AutoConfigurations.of(KeycardAutoConfiguration.class))
                 .withPropertyValues(
                         "keycard.zone-url=" + zone.issuer(),
-                        "keycard.audiences=" + AUDIENCE,
                         "keycard.client-id=cid",
                         "keycard.client-secret=csecret",
                         "keycard.resource-name=Test API",
@@ -477,9 +682,13 @@ class KeycardStarterConformanceTest {
     }
 
     private static String token(StubZone zone, String scope, String audience) {
+        return token(zone.issuer(), scope, audience);
+    }
+
+    private static String token(URI issuer, String scope, String audience) {
         long now = Instant.now().getEpochSecond();
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("iss", zone.issuer().toString());
+        claims.put("iss", issuer.toString());
         claims.put("sub", "user-1");
         claims.put("client_id", "client-1");
         claims.put("aud", List.of(audience));

@@ -3,6 +3,7 @@ package ai.keycard.mcp;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -10,6 +11,9 @@ import org.jspecify.annotations.Nullable;
 
 /** Writes RFC 6750 challenges and the 503 outage response. */
 final class BearerChallenge {
+
+    static final String BINDING_ATTRIBUTE = BearerChallenge.class.getName() + ".binding";
+    static final String ZONE_ATTRIBUTE = BearerChallenge.class.getName() + ".zone";
 
     static final String PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
@@ -53,16 +57,27 @@ final class BearerChallenge {
             @Nullable String error,
             @Nullable String description)
             throws IOException {
-        StringBuilder value = new StringBuilder("Bearer ");
+        Object configured = request.getAttribute(BINDING_ATTRIBUTE);
+        String metadata = configured instanceof ResourceBinding binding && !binding.isLegacy()
+                ? binding.challengeUrl(request, (URI) request.getAttribute(ZONE_ATTRIBUTE))
+                        .map(URI::toString)
+                        .orElse(null)
+                : resourceMetadataUrl(request);
+        StringBuilder value = new StringBuilder("Bearer");
         if (error != null) {
-            value.append("error=\"").append(error).append("\", ");
+            value.append(" error=\"").append(error).append('"');
             if (description != null) {
-                value.append("error_description=\"").append(quote(description)).append("\", ");
+                value.append(", error_description=\"")
+                        .append(quote(description))
+                        .append('"');
             }
         }
-        value.append("resource_metadata=\"")
-                .append(resourceMetadataUrl(request))
-                .append('"');
+        if (metadata != null) {
+            value.append(error == null ? " " : ", ")
+                    .append("resource_metadata=\"")
+                    .append(metadata)
+                    .append('"');
+        }
         response.setHeader("WWW-Authenticate", value.toString());
         json(response, status, error == null ? "{\"error\":\"unauthorized\"}" : "{\"error\":\"" + error + "\"}");
     }

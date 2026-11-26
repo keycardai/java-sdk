@@ -9,7 +9,7 @@ implementation("ai.keycard:keycard-spring-boot-starter:0.1.0")
 
 ```properties
 keycard.zone-url=https://acme.keycard.cloud
-keycard.audiences=https://api.example.com
+keycard.resource-identifier=https://api.example.com/mcp
 keycard.client-id=...          # for @KeycardGrant; or define a Credential bean
 keycard.client-secret=...
 ```
@@ -48,10 +48,27 @@ List<Event> events(AccessContext access) {
 }
 ```
 
-The starter serves RFC 9728 metadata through Spring Security's filter (Spring's web starter
-brings the Jackson it writes with) and proxies the zone's RFC 8414 metadata. A missing or invalid
-token gets a 401 with an RFC 6750 challenge, a malformed header 400, a missing scope 403, and
-unreachable zone keys a 503 with no challenge. Every bean backs off to one you define.
+The resource identifier supplies the exact audience and the `resource` in the RFC 9728
+document. When the received path and query match it, the challenge advertises the configured
+host-root metadata URL. If the application has a servlet context prefix, forward that public
+URL into the context and set `keycard.metadata-forwarded=true`. The starter also proxies
+the zone's RFC 8414 metadata.
+
+Use a URN, `keycard.multi-resource=true` with `keycard.audiences`, or
+`keycard.allow-any-audience=true` for verification without protected-resource discovery.
+For multiple zones, use the base issuer as `keycard.zone-url` and configure
+`keycard.resource-identifiers-by-zone.<zone-id>` for each trusted zone. Provide a
+`RequireBearerAuthFilter.ZoneResolver` bean that reads no token, or use shared discovery
+with the same HTTP(S) resource for every zone, `keycard.multi-resource=true`, and the
+shared resource as the only `keycard.audiences` value. Without an explicit mode, the
+starter keeps legacy discovery and warns at construction. The starter checks the policy
+of a custom `KeycardJwtDecoder` against an explicit binding. For other decoders, the
+application must enforce the configured audience policy; per-zone request selection
+requires the Keycard decoder.
+
+A missing or invalid token gets a 401 with an RFC 6750 challenge, a malformed header 400,
+a missing scope 403, and unreachable zone keys a 503 with no challenge. Every bean backs off
+to one you define.
 
 [examples/mcp-server-spring-ai](../examples/mcp-server-spring-ai) runs a Spring AI MCP server
 behind it.
