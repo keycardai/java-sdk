@@ -49,6 +49,7 @@ class JwksCachingConformanceTest {
     }
 
     @Test
+    @DisplayName("a keyring prints only its issuer identifiers")
     void keyringPrintsOnlyIssuerIdentifiers() {
         try (StubZone zone = zone(k1)) {
             JwksKeyring keyring = keyring(zone);

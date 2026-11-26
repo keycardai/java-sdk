@@ -58,6 +58,7 @@ class TokenExchangeConformanceTest {
     private final TestClock clock = TestClock.start();
 
     @Test
+    @DisplayName("a credential and client print an identity source's type without calling its toString")
     void identitySourcesPrintTheirTypeWithoutInvokingToString() {
         var source = new IdentityTokenSource() {
             @Override
