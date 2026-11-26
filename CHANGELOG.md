@@ -1,3 +1,15 @@
+## v0.6.0 (2026-11-26)
+
+
+- feat(a2a): bound decoded peer replies (#30)
+- * feat(a2a): bound decoded peer replies
+- Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+- * fix(a2a): apply the peer limit to a JDK transport from httpClient
+- ---------
+- Co-authored-by: devin-ai-keycard <devin-ai@keycard.ai>
+Co-authored-by: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+Co-authored-by: Larry Osakwe <23560354+Larry-Osakwe@users.noreply.github.com>
+
 ## v0.5.2 (2026-11-26)
 
 
