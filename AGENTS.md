@@ -21,7 +21,7 @@ The Keycard Java SDK: a Gradle multi-module build (Kotlin DSL) publishing to Mav
   - `keycard.java-library`: `--release 17`, `-Xlint:all -Werror -parameters`, Javadoc `-Xdoclint:all -Werror`, JSpecify as `api`, JUnit Jupiter + AssertJ for tests, Spotless with palantir-java-format, `Automatic-Module-Name` = `ai.keycard.<module>`, LICENSE in every jar.
   - `keycard.publishing`: `com.vanniktech.maven.publish` to Central, POM metadata, signing only when `signingInMemoryKey` is set.
 - Versions live in `gradle/libs.versions.toml`. `settings.gradle.kts` sets `FAIL_ON_PROJECT_REPOS`, so do not add repositories in module builds.
-- `examples/` (`engine-obo`, `mcp-server-servlet`, `mcp-server-spring-ai`, `a2a-delegation`) are separate Gradle builds that consume the SDK from source via `includeBuild("../..")`.
+- `examples/` (`mcp-server-servlet`, `mcp-server-spring-ai`, `a2a-delegation`) are separate Gradle builds that consume the SDK from source via `includeBuild("../..")`.
 - Design reference: `docs/idiom-profile.md` (how the shared contract maps to Java, with reasons), `docs/conformance-report.md`, `docs/releasing.md`.
 
 ## Setup, build, test (as CI runs them)
@@ -66,7 +66,6 @@ From `.cz.toml` and `docs/releasing.md`:
 - No WireMock or MockWebServer; keep the test classpath as small as the runtime one.
 - The `bin/selftest` scripts are hermetic end-to-end checks against a stub zone, run in CI.
 - Live coverage against real zones belongs to the eval in `keycardai/templates`.
-- `examples/live-e2e` still exists: a bash script that runs every non-interactive live suite (`engine-obo/bin/*-e2e`, `mcp-server-servlet`, `mcp-server-spring-ai` and `a2a-delegation` `bin/live-e2e`) against one sandbox zone. It needs `KEYCARD_ZONE_URL`, `ZONE_ID`, `ORG_ID`, `LIVE_DIR` with engine-obo provisioning, a SPIRE server container and cloudflared. It is not run in CI. Do not add new live suites here.
 
 ## Idioms and gotchas
 
