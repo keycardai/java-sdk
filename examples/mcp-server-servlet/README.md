@@ -51,9 +51,6 @@ Endpoints: `GET /healthz`, `GET /.well-known/oauth-protected-resource/mcp`,
   well-knowns, the 401 challenge, the 403 `insufficient_scope`), then drives both tools with the
   MCP SDK's own client. One downstream resource exchanges and one is refused, so it also checks
   that a failed resource doesn't stop the other. CI runs it.
-- `bin/live-e2e` runs the grant-decorator Integration Tests against a live zone. It reuses the
-  [engine-obo](../engine-obo) provisioning and `LIVE_DIR`: the server runs as the engine
-  application (v2 token credential, JWT-SVID assertion minted from the SPIRE server container),
-  the user token from engine-obo's `bin/sign-in` calls it, and the grant exchanges that token
-  for the ledger resource plus one resource registered nowhere. It expects a token for the
-  ledger with the engine in `act`, and `invalid_target` for the other.
+- There is no live run here. The `mcp-server-java` and `mcp-delegated-access-java` templates in
+  [keycardai/templates](https://github.com/keycardai/templates) run `keycard-mcp` and the grant against a
+  real zone in that repo's Template Eval.

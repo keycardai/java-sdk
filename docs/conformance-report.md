@@ -11,7 +11,7 @@ section.
 | Modules | `keycard-oauth`, `keycard-spiffe`, `keycard-mcp`, `keycard-a2a`, `keycard-spring-boot-starter` |
 | Capability specs covered | 21 of 24; 2 excluded on purpose, `delegated-access/as-itself` waits on the demand-gated agent integrations |
 | Unit tests | 310, in 28 suites; 25 are conformance suites mapped to spec Testing tables or the framework checklist |
-| Live-zone rows | 42 passing, 5 failing on zone behavior that differs from the spec, 7 not run (listed below) |
+| Live-zone rows | Last run November 10, 2026: 42 passing, 5 failing on zone behavior that differs from the spec, 7 not run (listed below). The templates eval now runs some of these rows live (listed below). |
 | Example selftests | 3 in CI, with no zone: an MCP Java SDK servlet server (12 checks), a Spring AI MCP server (9), and A2A delegation with agent B on a2a-java (10) |
 | Java versions | 17, 21 and 25 in CI; bytecode is `--release 17` |
 | Checks | `-Xlint:all -Werror`, Javadoc `-Xdoclint:all -Werror`, Spotless (Palantir) |
@@ -73,10 +73,24 @@ rows, such as construction errors and Java-specific edges, named without a row n
 
 ## Live-zone results
 
-`examples/live-e2e` runs every non-interactive live suite against one sandbox zone. The
-interactive device rows run through `examples/engine-obo/bin/device-e2e confirm` and `deny`.
-The engine application authenticates with a v2 token credential and SPIRE JWT-SVIDs unless a
-row says otherwise; the subject token is a real user's, from the loopback sign-in.
+A historical record: the last live run, on November 10, 2026, against one sandbox zone. The
+engine application authenticated with a v2 token credential and SPIRE JWT-SVIDs unless a row
+says otherwise; the subject token was a real user's, from the loopback sign-in.
+
+This repo carries no live drivers. The Template Eval in
+[keycardai/templates](https://github.com/keycardai/templates) runs `mcp-server-java`,
+`mcp-delegated-access-java`, `mcp-server-java-spring-ai` and `a2a-delegation-java` against a real
+zone, and those templates exercise these rows live:
+
+- authorization-server-discovery 1
+- bearer-token-verification-middleware
+- oauth-metadata-endpoints
+- token-exchange 1, through the grant and `DelegationClient`
+- access-context / grant-decorator 1
+- a2a-delegation 1
+
+Every other row in the table is now covered only by its conformance suite against `StubZone`.
+The rows under Manual checks also need a person or outside infrastructure to run live.
 
 | Spec | Row | Result |
 | --- | --- | --- |
@@ -118,6 +132,18 @@ the UserInfo resource, which the loopback client doesn't request), device rows 2
 denies; a code expires), route-level-auth-gating rows 1 and 2 (the signed-in token carries no
 scopes), and multi-zone-support row 1 (one sandbox zone). The device-authorization denial path is
 covered by a policy denial on the confirmation page, which ended the poll with `access_denied`.
+
+### Manual checks
+
+These rows need a person, a SPIRE agent, or a public tunnel serving the JWKS to run live. They
+have no driver: a live check is manual, against a zone set up by hand. Their conformance suites
+cover them hermetically.
+
+| Rows | Hermetic coverage |
+| --- | --- |
+| device-authorization 1 and the denial path: a person confirms or denies a code | `DeviceAuthorizationConformanceTest` |
+| web-identity 1 and 2, jwt-signing-and-verification 1, device-authorization 7: WebIdentity | `WebIdentityConformanceTest`, `JwtSigningAndVerificationConformanceTest`, `DeviceAuthorizationConformanceTest` |
+| workload-identity 1 through the SPIFFE Workload API | `WorkloadIdentityConformanceTest`, `SpiffeJwtSvidSourceTest` |
 
 ## Findings against the spec
 
@@ -172,10 +198,9 @@ client authentication.
 examples/mcp-server-servlet/bin/selftest         # no zone needed
 examples/mcp-server-spring-ai/bin/selftest
 examples/a2a-delegation/bin/selftest
-
-export KEYCARD_ZONE_URL=https://<zone-id>.keycard.cloud LIVE_DIR=/path/outside/the/repo
-export ZONE_ID=<zone-id> ORG_ID=<org-id>
-examples/engine-obo/bin/sign-in                  # once, in a browser
-examples/live-e2e                                # every non-interactive live suite
-examples/engine-obo/bin/device-e2e confirm       # needs a person to approve a code
 ```
+
+The live rows run in the Template Eval in
+[keycardai/templates](https://github.com/keycardai/templates); its
+[eval README](https://github.com/keycardai/templates/blob/main/eval/README.md) covers running it
+against a zone. The rows under Manual checks have no driver.

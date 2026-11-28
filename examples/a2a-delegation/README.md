@@ -25,14 +25,6 @@ wire, and B uses it directly in a plain servlet.
   records A in `act`. The selftest checks B's card, the 401 on an unauthenticated call, that a
   token minted for A is refused at B, and that B verified the user, its own audience and A in
   `act` after a2a-java parsed A's message.
-- `bin/live-e2e` runs the Integration Tests against a live zone. It reuses the
-  [engine-obo](../engine-obo) provisioning and its signed-in user token: A runs as the engine
-  and B as the gateway (v2 token credentials, JWT-SVIDs from the SPIRE server container), and B
-  delegates on to a reporting agent C. B and C listen on `127.0.0.1:9601` and `:9603`, the
-  identifiers of their registered resources, because the exchange's resource is the target's
-  base URL.
-
-Row 1 (B sees the user as `sub` and the engine in `act`) passes. Row 2 expects `act` on C's token
-to name the gateway over the engine; production zones replace the chain with the latest caller
-when the exchange carries no actor token, so C sees only the gateway. The A2A path sends no
-actor token in any SDK, so row 2 fails in every SDK against a live zone today.
+- There is no live run here. The `a2a-delegation-java` template in
+  [keycardai/templates](https://github.com/keycardai/templates) runs `DelegationClient` against a real zone in
+  that repo's Template Eval.

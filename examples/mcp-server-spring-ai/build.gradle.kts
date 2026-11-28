@@ -36,9 +36,3 @@ tasks.register<JavaExec>("selftest") {
     classpath = selftest.runtimeClasspath
     mainClass.set("example.SelfTest")
 }
-
-tasks.register<JavaExec>("liveE2e") {
-    description = "Runs the server against a live zone with a real user token."
-    classpath = selftest.runtimeClasspath
-    mainClass.set("example.LiveE2e")
-}
